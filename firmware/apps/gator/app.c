@@ -89,6 +89,8 @@ static uint32_t overloads_seen;
 static const char *flash_msg;
 static uint32_t flash_msg_until;
 static int16_t last_plaits_engine = 0;
+static macro_patch_t plaits_cached, lofi_cached;
+static uint8_t have_plaits_cache, have_lofi_cache;
 
 /* New engine imports should preserve the old preset format.
  * On FIRST switching from Plaits to LOFI, load Felucca's own clean
@@ -115,11 +117,25 @@ static void switch_engine(int16_t next)
         return;
     macro_all_notes_off();
     lo_all_off();
-    if (prior != MUTANT_LOFI_MODEL)
+    fm1_irq_off();
+    if (prior == MUTANT_LOFI_MODEL) {
+        lofi_cached = patch;
+        have_lofi_cache = 1;
+    } else {
+        plaits_cached = patch;
+        have_plaits_cache = 1;
         last_plaits_engine = prior;
-    if (next == MUTANT_LOFI_MODEL)
-        lofi_clean_start(&patch);
+    }
+    if (next == MUTANT_LOFI_MODEL) {
+        if (have_lofi_cache)
+            patch = lofi_cached;
+        else
+            lofi_clean_start(&patch);
+    } else if (have_plaits_cache) {
+        patch = plaits_cached;
+    }
     patch.engine = next;
+    fm1_irq_on();
     dirty = D_ALL;
 }
 
@@ -299,6 +315,11 @@ static void preset_select(uint32_t i)
     fm1_irq_off();
     patch = bank.preset[bank.current];
     fm1_irq_on();
+    /* Recalling a preset resets the temporary per-engine edit histories. */
+    have_plaits_cache = 0;
+    have_lofi_cache = 0;
+    if (patch.engine < MUTANT_LOFI_MODEL)
+        last_plaits_engine = patch.engine;
     dirty = D_ALL;
 }
 
