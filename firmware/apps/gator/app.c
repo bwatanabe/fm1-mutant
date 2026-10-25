@@ -486,6 +486,8 @@ static int32_t main_mod(uint32_t row)
 static void draw_main_row(uint32_t row)
 {
     static const char *const LABEL[4] = {"HARM", "TIMBRE", "MORPH", "FREQ"};
+    static const char *const CHIP_LABEL[4] = {"CHIP", "WAVE", "DUTY", "FREQ"};
+    const char *const *names = patch.engine == MUTANT_LOFI_MODEL ? CHIP_LABEL : LABEL;
     char b[16], n[8];
     const uint32_t y = 48u + row * 30u;
     if (row == 3) {
@@ -493,12 +495,15 @@ static void draw_main_row(uint32_t row)
         note_name(n, mon.note10);
         str_cpy(b + str_len(b), " ST  ", sizeof b - str_len(b));
         str_cpy(b + str_len(b), n, sizeof b - str_len(b));
-        draw_row(y, KNOB_COLOR[3], LABEL[3], 0, b, patch.transpose, -24, 24, main_mod(3));
+        draw_row(y, KNOB_COLOR[3], names[3], 0, b, patch.transpose, -24, 24, main_mod(3));
         return;
     }
-    fmt_int(b, *knob_field(row) / 10);
-    draw_row(y, KNOB_COLOR[row], LABEL[row], MODEL_PARAM[patch.engine][row], b, *knob_field(row), 0, 1000,
-             main_mod(row));
+    if (patch.engine == MUTANT_LOFI_MODEL)
+        fmt_int(b, row < 2u ? *knob_field(row) * 4 / 1000 : *knob_field(row) * 127 / 1000);
+    else
+        fmt_int(b, *knob_field(row) / 10);
+    draw_row(y, KNOB_COLOR[row], names[row], patch.engine == MUTANT_LOFI_MODEL ? 0 :
+             MODEL_PARAM[patch.engine][row], b, *knob_field(row), 0, 1000, main_mod(row));
 }
 
 static void draw_text_line(uint32_t y, const char *s, uint16_t c)
@@ -587,6 +592,18 @@ static void draw_generic_row(uint32_t row)
         return;
     }
     format_param(b, sizeof b, p);
+    if (patch.engine == MUTANT_LOFI_MODEL && page == PAGE_ATTN && row < 3u) {
+        static const char *const N[] = {"CRSH", "SWP", "VIB"};
+        fmt_int(b, (*p->value + 100) * 127 / 200);
+        draw_row(y, KNOB_COLOR[row], N[row], 0, b, *p->value, p->lo, p->hi, *p->value);
+        return;
+    }
+    if (patch.engine == MUTANT_LOFI_MODEL && page == PAGE_LPG && row < 2u) {
+        fmt_int(b, *p->value * (row ? 127 : 3) / 1000);
+        draw_row(y, KNOB_COLOR[row], row ? "TONE" : "ARP", 0, b,
+                 *p->value, p->lo, p->hi, *p->value);
+        return;
+    }
     draw_row(y, KNOB_COLOR[row], p->label, 0, b, *p->value, p->lo, p->hi, *p->value);
 }
 
@@ -833,7 +850,9 @@ static void handle_knobs_main(const fw_input_t *in)
 {
     uint32_t i;
     for (i = 0; i < 3u; i++) {
-        if (adjust(knob_field(i), knob_fast[FW_KNOB_1 + i], 10, 0, 1000))
+        const int32_t step = patch.engine == MUTANT_LOFI_MODEL && i < 2u ? 250 : 10;
+        const int32_t delta = step == 250 ? in->knob[FW_KNOB_1 + i] : knob_fast[FW_KNOB_1 + i];
+        if (adjust(knob_field(i), delta, step, 0, 1000))
             dirty |= FW_BIT(D_ROW0 + i);
     }
     if (adjust(&patch.transpose, in->knob[FW_KNOB_4], 1, -24, 24))
@@ -876,8 +895,12 @@ static void handle_knobs_generic(const fw_input_t *in)
     const page_t *pg = &PAGE_DEF[page];
     uint32_t i;
     for (i = 0; i < 4u; i++) {
-        if (adjust_param(&pg->knob[i], in, FW_KNOB_1 + i))
+        if (patch.engine == MUTANT_LOFI_MODEL && page == PAGE_LPG && i == 0u) {
+            if (adjust(&patch.decay, in->knob[FW_KNOB_1], 334, 0, 1000))
+                dirty |= FW_BIT(D_ROW0);
+        } else if (adjust_param(&pg->knob[i], in, FW_KNOB_1 + i)) {
             dirty |= FW_BIT(D_ROW0 + i);
+        }
     }
     if (adjust_param(&pg->enc[0], in, FW_KNOB_SELECT) | adjust_param(&pg->enc[1], in, FW_KNOB_ALGO))
         dirty |= FW_BIT(D_ENC);
