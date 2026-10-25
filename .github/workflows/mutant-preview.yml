@@ -4,7 +4,7 @@ name: mutant-preview
 
 on:
   push:
-    branches: [feature/plaits-lofi]
+    branches: [main, feature/plaits-lofi]
   workflow_dispatch:
 
 permissions:
