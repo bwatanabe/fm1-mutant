@@ -70,7 +70,7 @@ jobs:
       pages: write
       id-token: write
     environment:
-      name: github-pages
+      name: mutant-preview
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - id: deploy
