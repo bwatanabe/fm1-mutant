@@ -59,7 +59,14 @@ static inline int32_t fe_pole(int32_t a)                /* a: 0..32767 */
 }
 #endif
 
-static inline int32_t mulq15(int32_t a, int32_t b) { return (a * b) >> 15; }
+/* Mutant v0.5 safety adaptation (only deviation from pinned Felucca helper):
+ * aggressive chip excitation can exceed signed 16-bit before gain. Its
+ * product with Q15 amplitude must not overflow signed 32-bit (undefined C
+ * behavior). Use a wide temporary, then retain the original >> 15 result. */
+static inline int32_t mulq15(int32_t a, int32_t b)
+{
+    return (int32_t)(((int64_t)a * b) >> 15);
+}
 /* a * k / 65536 without 64-bit: a up to 2^31, k Q16 */
 static inline int32_t mulq16(int32_t a, uint32_t k)
 {
