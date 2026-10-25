@@ -1,0 +1,70 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="FM-1 Mutant experimental synthesizer: preview a real firmware image in the browser, then optionally install on an M-VAVE FM-1.">
+<title>FM-1 Mutant — Preview & Install</title>
+<style>
+:root{color-scheme:dark;--bg:#0e1014;--panel:#1b1e25;--line:#353947;--fg:#edf0f5;--mute:#a9adb7;--hot:#f59e67;--green:#86d4aa}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 system-ui,-apple-system,sans-serif}
+main{max-width:1120px;margin:0 auto;padding:32px 20px 70px}
+header{display:flex;justify-content:space-between;gap:20px;align-items:start;flex-wrap:wrap}
+h1{font:600 clamp(26px,4.5vw,48px)/1.15 ui-monospace,SFMono-Regular,Consolas,monospace;letter-spacing:-.045em;margin:0}
+h1 em{font-style:normal;color:var(--hot)}
+h2{font:600 17px/1.4 system-ui,sans-serif;margin:0 0 14px}
+p{margin:0 0 14px}.muted,small{color:var(--mute)}a{color:var(--hot)}
+nav a{margin-right:16px}article{background:var(--panel);border:1px solid var(--line);padding:20px;border-radius:12px}
+section{margin-top:26px}.hero{max-width:720px;color:var(--mute);margin:14px 0 0}
+.columns{display:grid;grid-template-columns:1.3fr 1fr;gap:18px}.stack{display:grid;gap:18px}
+button,.button{display:inline-block;background:var(--hot);color:#101116;font:600 14px system-ui;border:0;border-radius:7px;padding:11px 16px;text-decoration:none;cursor:pointer}
+button.secondary,.button.secondary{background:transparent;color:var(--fg);border:1px solid var(--line)}
+button:disabled{opacity:.4;cursor:not-allowed}
+.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+input[type=file]{display:block;color:var(--fg);max-width:100%;margin:12px 0}
+#device{width:100%;height:560px;border:1px solid var(--line);border-radius:9px;background:#101010}
+#status{min-height:24px;color:var(--mute)}#status.good{color:var(--green)}#status.bad{color:#f39486}
+progress{display:block;width:100%;height:8px;accent-color:var(--hot);margin:10px 0}
+pre{font:12px/1.5 monospace;white-space:pre-wrap;overflow-wrap:anywhere;max-height:240px;overflow:auto}
+code{background:#101218;padding:2px 5px;border-radius:4px}
+ol{padding-left:21px;margin:0}li{margin-bottom:7px}
+.warn{border-left:3px solid #f7ad4e;padding-left:12px;color:#f5d39c}
+footer{margin-top:30px;font-size:13px;color:var(--mute)}
+@media(max-width:850px){.columns{grid-template-columns:1fr}#device{height:480px}}
+</style>
+</head>
+<body><main>
+<header><div><h1>FM-1 <em>MUTANT</em></h1><p class="hero">An experimental multi-engine sound instrument built by combining existing open-source DSP engines. First experiment: Felucca's chip-inspired LOFI synthesis on the GATOR platform.</p></div>
+<nav><a href="https://github.com/bwatanabe/fm1-mutant">Source</a><a href="https://github.com/bwatanabe/fm1-mutant/pulls">Development</a></nav></header>
+<section class="columns">
+<article><h2>1 · Try the FM-1 in your browser</h2>
+<p class="muted">This is Joakim Eriksson's full FM-1 emulator, running actual firmware in WebAssembly. It has audio, screen, encoders, keyboard and MIDI input. It initially loads its own default firmware—not Mutant.</p>
+<iframe id="device" src="https://joakimeriksson.github.io/fm1-emu/?embed=1" title="FM-1 hardware emulator" allow="autoplay; midi; midi-sysex" loading="lazy"></iframe>
+<div class="row" style="margin-top:14px"><a class="button secondary" href="https://joakimeriksson.github.io/fm1-emu/" target="_blank" rel="noopener">Open full emulator</a><a class="button" id="firmwareDownload" href="#" download hidden>Download Mutant .fwsc</a></div>
+<p class="muted" style="margin-top:12px">To audition <strong>Mutant</strong>, download the .fwsc above, open the full emulator, use <strong>Open .fwsc…</strong>, then press Start. The browser preview runs exactly the compiled firmware image, not a recreated synth engine. The emulated CPU load may differ from real hardware.</p>
+</article>
+<div class="stack">
+<article><h2>2 · Install on your physical FM-1</h2>
+<p class="warn">Experimental firmware. Do not install an untested build. Flashing can require recovery if interrupted or incompatible. Keep the known-good GATOR installer available.</p>
+<p id="buildInfo" class="muted">Checking for a compiled Mutant firmware…</p>
+<div class="row"><button id="installHosted" disabled>Install published build</button></div>
+<p class="muted" style="margin:18px 0 0">Or install a <strong>trusted local</strong> .fwsc package:</p>
+<input id="local" type="file" accept=".fwsc">
+<button class="secondary" id="installLocal" disabled>Install selected file</button>
+<progress id="progress" value="0" max="100"></progress>
+<p id="status" role="status" aria-live="polite"></p>
+<details><summary>Detailed update log</summary><pre id="log"></pre></details>
+<p class="muted" style="margin-top:14px">Requires Chrome or Edge with Web MIDI SysEx permission and a direct USB data cable. Close DAWs and MIDI apps during updating. Do not disconnect until the updater reports completion.</p>
+</article>
+<article><h2>3 · How to test changes</h2>
+<ol>
+<li>Build <code>mutant.fwsc</code> using GitHub Actions or locally.</li>
+<li>Open it in the emulator; audition notes, parameters and CC messages.</li>
+<li>When it sounds good, install the identical package on the FM-1.</li>
+<li>Report audio glitches or MIDI surprises in GitHub before merging.</li>
+</ol></article>
+</div></section>
+<footer>FM-1 Mutant is unofficial and not affiliated with M-VAVE. Emulator © its respective authors; the embedded emulator is served by its own project. The GATOR/Felucca firmware update protocol is reused under GPL-3.0-only; Felucca LOFI DSP is MIT. <a href="https://github.com/bwatanabe/fm1-mutant/blob/main/LICENSE">License</a> · <a href="https://github.com/Quixotic7/MvaveFM1Unbricker">Recovery reference</a></footer>
+</main><script type="module" src="mutant.js"></script></body></html>

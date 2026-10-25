@@ -1,0 +1,13 @@
+# MIDI smoke test: should make audible LOFI output and render its screen
+master 900
+midi 0x90 60 110
+frames 28
+midi 0xB0 16 127
+midi 0xB0 17 80
+midi 0xB0 18 64
+frames 35
+midi 0x80 60 0
+frames 38
+screen build/host/out/mutant.ppm
+wav build/host/out/mutant.wav
+quit

@@ -5,7 +5,7 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, feature/felucca-lofi]
   pull_request:
   workflow_dispatch:
 
@@ -62,6 +62,7 @@ jobs:
           ulimit -n 8192 || true
           ./build.sh
           ./build.sh --app demo
+          ./build.sh --app mutant
           ls -l build/*.fwsc
 
       - name: Host simulator and tests
@@ -70,11 +71,16 @@ jobs:
           python3 tools/sim.py
           python3 tools/sim.py host/models.sim
           python3 tools/sim.py --app demo
+          python3 tools/sim.py --app mutant
           python3 tools/sim.py --test
 
       - name: Installer protocol and site
         run: |
           set -euo pipefail
           node web/test_web.mjs build/gator.fwsc
+          node web/test_web.mjs build/mutant.fwsc
+          node --check web/mutant.js
+          python3 web/make_mutant_site.py
+          (cd build/mutant-site/firmware && sha256sum -c SHA256SUMS)
           python3 web/make_site.py
           (cd build/site/firmware && sha256sum -c SHA256SUMS)
