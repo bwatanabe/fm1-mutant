@@ -88,6 +88,40 @@ static int shown_edited;
 static uint32_t overloads_seen;
 static const char *flash_msg;
 static uint32_t flash_msg_until;
+static int16_t last_plaits_engine = 0;
+
+/* New engine imports should preserve the old preset format.
+ * On FIRST switching from Plaits to LOFI, load Felucca's own clean
+ * PULSE LD starting point, instead of interpreting arbitrary Plaits
+ * parameters as bitcrush/sweep controls. A saved LOFI preset is NOT reset. */
+static void lofi_clean_start(macro_patch_t *p)
+{
+    const preset_t *src = &LOFI_PRESETS[0]; /* PULSE LD, existing upstream preset */
+    p->harmonics = (int16_t)((int32_t)src->e[0] * 1000 / 4);
+    p->timbre = (int16_t)((int32_t)src->e[1] * 1000 / 4);
+    p->morph = (int16_t)((int32_t)src->e[2] * 1000 / 127);
+    p->fm_amt = (int16_t)((int32_t)src->e[3] * 200 / 127 - 100);
+    p->timbre_amt = (int16_t)((int32_t)src->e[4] * 200 / 127 - 100);
+    p->morph_amt = (int16_t)((int32_t)src->e[5] * 200 / 127 - 100);
+    p->decay = (int16_t)((int32_t)src->e[6] * 1000 / 3);
+    p->colour = (int16_t)((int32_t)src->e[7] * 1000 / 127);
+}
+
+/* Switch engines from keyboard/encoder/MIDI with one consistent path. */
+static void switch_engine(int16_t next)
+{
+    const int16_t prior = patch.engine;
+    if (next < 0 || next >= MUTANT_ENGINES || next == prior)
+        return;
+    macro_all_notes_off();
+    lo_all_off();
+    if (prior != MUTANT_LOFI_MODEL)
+        last_plaits_engine = prior;
+    if (next == MUTANT_LOFI_MODEL)
+        lofi_clean_start(&patch);
+    patch.engine = next;
+    dirty = D_ALL;
+}
 
 static const page_t PAGE_DEF[PAGES] = {
     [PAGE_ATTN] = {"ATTENUVERTERS", {
@@ -752,6 +786,12 @@ static void handle_buttons(const fw_input_t *in)
         if (in->pressed & FW_BIT(MAP[i][0]))
             set_page(MAP[i][1]);
     }
+    /* Single-button browser-friendly shortcut: tapping HOME while already
+     * on HOME toggles LOFI / last Plaits model. HOME + note still selects a model. */
+    if (was == PAGE_MAIN && (in->pressed & FW_BIT(FW_BTN_HOME)) &&
+        !in->keys && !in->keys_pressed) {
+        switch_engine(patch.engine == MUTANT_LOFI_MODEL ? last_plaits_engine : MUTANT_LOFI_MODEL);
+    }
     if ((in->pressed & FW_BIT(FW_BTN_SAVE)) && was == PAGE_SAVE) {
         bank_save(save_slot, in->ms);
         set_page(PAGE_MAIN);
@@ -766,9 +806,10 @@ static void handle_buttons(const fw_input_t *in)
     }
     if (in->pressed & FW_BIT(FW_BTN_REC)) {
         hold = !hold;
-        if (!hold)
+        if (!hold) {
             macro_all_notes_off();
             lo_all_off();
+        }
         dirty |= FW_BIT(D_STATUS);
     }
     if (in->pressed & FW_BIT(FW_BTN_OCT_DOWN))
@@ -791,8 +832,7 @@ static void handle_keys(const fw_input_t *in)
         if (!(in->keys_pressed & FW_BIT(k)))
             continue;
         if (model_mode && k < MUTANT_ENGINES) {
-            patch.engine = (int16_t)k;
-            dirty |= FW_BIT(D_HEADER) | 0x1Eu;
+            switch_engine((int16_t)k);
             continue;
         }
         key_note[k] = (uint8_t)clampi((int32_t)(FW_KEY_BASE_NOTE + k) + octave * 12, 0, 127);
@@ -807,15 +847,8 @@ static void handle_midi_cc(uint32_t cc, uint32_t v)
         mod_wheel = (uint8_t)v;
     if (cc >= 16u && cc <= 18u)
         *knob_field(cc - 16u) = (int16_t)(v * 1000u / 127u);
-    if (cc == 19u) {
-        const int16_t next = (int16_t)(v * MUTANT_ENGINES / 128u);
-        if (next != patch.engine) {
-            /* MIDI can select the engine and send notes within the same frame. */
-            macro_all_notes_off();
-            lo_all_off();
-            patch.engine = next;
-        }
-    }
+    if (cc == 19u)
+        switch_engine((int16_t)(v * MUTANT_ENGINES / 128u));
     if (cc >= 16u && cc <= 19u)
         dirty |= FW_BIT(D_HEADER) | 0x1Eu;
     if (patch.engine == MUTANT_LOFI_MODEL && cc >= 20u && cc <= 24u) {
@@ -864,9 +897,12 @@ static void handle_knobs_main(const fw_input_t *in)
     }
     if (adjust(&patch.transpose, in->knob[FW_KNOB_4], 1, -24, 24))
         dirty |= FW_BIT(D_ROW0 + 3u);
-    if (adjust(&patch.engine, in->knob[FW_KNOB_SELECT], 1, 0, MUTANT_ENGINES - 1) ||
-        adjust(&patch.engine, in->knob[FW_KNOB_ALGO], 8, 0, MUTANT_ENGINES - 1))
-        dirty |= FW_BIT(D_HEADER) | 0x0Eu;
+    {
+        int16_t next = patch.engine;
+        adjust(&next, in->knob[FW_KNOB_SELECT], 1, 0, MUTANT_ENGINES - 1);
+        adjust(&next, in->knob[FW_KNOB_ALGO], 8, 0, MUTANT_ENGINES - 1);
+        switch_engine(next);
+    }
 }
 
 static void handle_knobs_matrix(const fw_input_t *in)
@@ -953,6 +989,8 @@ static void app_init(void)
     bank_load();
     global = bank.global;
     preset_select(bank.current);
+    if (patch.engine < MUTANT_LOFI_MODEL)
+        last_plaits_engine = patch.engine;
     macro_init();
     lo_all_off();
 }
