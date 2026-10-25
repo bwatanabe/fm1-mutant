@@ -1,0 +1,36 @@
+# Mutant v0.6: noise chip oscillator through moving formants
+master 900
+midi 0xB0 19 127
+frames 6
+midi 0xB0 16 0
+midi 0xB0 17 105
+midi 0xB0 18 0
+midi 0xB0 20 64
+midi 0xB0 21 64
+midi 0xB0 22 0
+midi 0xB0 23 127
+midi 0xB0 24 120
+midi 0xB0 25 127
+# Velocity/modwheel/CC updates while note held, then switch to Plaits
+midi 0xB0 26 0
+midi 0xB0 1 0
+midi 0x90 55 125
+frames 35
+midi 0xB0 1 80
+frames 35
+midi 0xB0 1 127
+midi 0xB0 26 60
+frames 80
+midi 0xB0 26 0
+midi 0xB0 1 30
+frames 35
+midi 0x80 55 0
+frames 8
+midi 0xB0 19 0
+frames 4
+midi 0x90 64 114
+frames 45
+midi 0x80 64 0
+frames 15
+wav build/host/out/motion-live.wav
+quit
