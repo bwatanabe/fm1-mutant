@@ -6,9 +6,9 @@ The synthesizer remains a sound module, not a groovebox: the OP-XY, iPad or comp
 
 ## Selecting an engine
 
-1. On the built-in FM-1 keys, hold **HOME** and press the **25th key** (index 24) for LOFI CHIP.
-2. Alternatively, send **MIDI CC19 = 127** on the active channel, or adjust the SELECT encoder until **D1 — LOFI CHIP** appears.
-3. Return to any of the 24 original Plaits models by selecting another HOME+key or turning SELECT.
+1. **Single-button shortcut:** from the HOME page, tap **HOME again** to switch to LOFI CHIP. Tap HOME once more to return to your previously selected Plaits model. From another page, first press HOME to navigate to HOME, then press again to toggle. This works with one button at a time in the browser emulator.
+2. Alternatively, hold **HOME** and press key 25 (index 24), send **MIDI CC19 = 127**, or adjust the SELECT encoder until **D1 — LOFI CHIP** appears.
+3. Return to any of the 24 original Plaits models by using the same toggle, choosing HOME+key 1–24, sending MIDI CC19, or turning SELECT.
 4. The PRESET knob still accesses GATOR's original 16 patch slots. Changing the engine and saving writes the existing GATOR patch format — **no storage migration**.
 
 ## LOFI controls
@@ -24,11 +24,15 @@ LOFI uses the existing GATOR pages. The existing DSP module is copied unchanged 
 
 MIDI CCs: CC16=CHIP, CC17=WAVE, CC18=DUTY (original GATOR main-knob mappings); CC19 chooses the model; when LOFI is selected CC20=CRSH, 21=SWP, 22=VIB, 23=ARP, 24=TONE. CC120/123 silence notes. Note-on/off and pitch bend are implemented. Channel filtering still follows GATOR's GLOBAL MIDI CH setting.
 
+**Cleaner initial sound:** entering LOFI from a Plaits model now loads the exact sound parameters of Felucca's existing *PULSE LD* factory preset. Earlier versions reused arbitrary Plaits knob settings, which commonly translated to considerable sample-hold crushing. LOFI's inherent four-bit-style quantization remains intentional; CRSH and chip modes still offer much rougher textures when you want them. Selecting an already-saved LOFI patch does not overwrite its settings. The standard GATOR 16 patch slots are retained.
+
+**Splash screen:** The integrated app uses text-only **FM-1 MUTANT / v0.3-dev**, rather than the GATOR image, using a per-app `version.txt`.
+
 Notes: LOFI remains **monophonic** in this build, and we use a deliberately simple host envelope to avoid replacing its DSP. Switching synth families silences the previously active voice. Do not expect all GATOR modes, modulation routes or Plaits-specific controls to behave identically on LOFI.
 
 ## Browser testing
 
-At https://bwatanabe.github.io/fm1-mutant/ download the published `mutant.fwsc`. Load it in the full browser FM-1 emulator using **Open .fwsc…**, then Start. Try HOME+key25 or CC19=127, play from the on-screen keyboard or MIDI, turn K1–K3 and use the SCL/FX pages. Switch back to Plaits and confirm notes still play.
+At https://bwatanabe.github.io/fm1-mutant/ download the published `mutant.fwsc`. Load it in the full browser FM-1 emulator using **Open .fwsc…**, then Start. Try the new one-button HOME toggle or CC19=127, play from the on-screen keyboard or MIDI, turn K1–K3 and use the SCL/FX pages. Switch back to Plaits and confirm notes still play.
 
 **Do not assume emulator CPU timing represents physical FM-1 performance.** After basic browser testing, install through the same site and test the OP-XY over USB MIDI on real hardware, listening for glitches and confirming the ability to return to known-good GATOR.
 
