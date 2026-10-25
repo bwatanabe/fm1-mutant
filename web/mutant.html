@@ -36,14 +36,14 @@ footer{margin-top:30px;font-size:13px;color:var(--mute)}
 </style>
 </head>
 <body><main>
-<header><div><h1>FM-1 <em>MUTANT</em></h1><p class="hero">An experimental multi-engine sound instrument built by combining existing open-source DSP engines. Now combining 24 GATOR/Plaits synthesis models with Felucca's chip-inspired LOFI as model 25.</p></div>
+<header><div><h1>FM-1 <em>MUTANT</em></h1><p class="hero">An experimental multi-engine sound instrument built by combining existing open-source DSP engines. 24 GATOR/Plaits synthesis models plus Felucca's chip-inspired LOFI, with a clean default pulse sound and a one-button model toggle.</p></div>
 <nav><a href="https://github.com/bwatanabe/fm1-mutant">Source</a><a href="https://github.com/bwatanabe/fm1-mutant/pulls">Development</a></nav></header>
 <section class="columns">
 <article><h2>1 · Try the FM-1 in your browser</h2>
 <p class="muted">This is Joakim Eriksson's full FM-1 emulator, running actual firmware in WebAssembly. It has audio, screen, encoders, keyboard and MIDI input. It initially loads its own default firmware—not Mutant.</p>
 <iframe id="device" src="https://joakimeriksson.github.io/fm1-emu/?embed=1" title="FM-1 hardware emulator" allow="autoplay; midi; midi-sysex" loading="lazy"></iframe>
 <div class="row" style="margin-top:14px"><a class="button secondary" href="https://joakimeriksson.github.io/fm1-emu/" target="_blank" rel="noopener">Open full emulator</a><a class="button" id="firmwareDownload" href="#" download hidden>Download Mutant .fwsc</a></div>
-<p class="muted" style="margin-top:12px">To audition <strong>Mutant</strong>, download the .fwsc above, open the full emulator, use <strong>Open .fwsc…</strong>, then press Start. Select model <strong>25 (LOFI CHIP)</strong> using HOME + key 25 or MIDI CC19=127. The browser preview runs exactly the compiled firmware image, not a recreated synth engine. The emulated CPU load may differ from real hardware.</p>
+<p class="muted" style="margin-top:12px">To audition <strong>Mutant</strong>, download the .fwsc above, open the full emulator, use <strong>Open .fwsc…</strong>, then press Start. To reach <strong>LOFI CHIP</strong> with just one emulator button: tap <strong>HOME</strong> while already on the HOME page; tap HOME again to return to Plaits. (From another page, press HOME once to return to HOME, then again to toggle.) You can also use MIDI CC19=127. The browser preview runs exactly the compiled firmware image, not a recreated synth engine. The emulated CPU load may differ from real hardware.</p>
 </article>
 <div class="stack">
 <article><h2>2 · Install on your physical FM-1</h2>
