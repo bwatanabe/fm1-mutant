@@ -138,6 +138,8 @@ static void hybrid_clean_start(macro_patch_t *p)
     p->morph_amt = -100;       /* LOFI CRSH: off */
     p->decay = 900;           /* 90% filtered / wet */
     p->colour = 1000;         /* LOFI tone full open */
+    p->blend = 100;           /* destination vowel U */
+    p->spread = 0;            /* static vowel until motion is requested */
 }
 
 /* Switch engines from keyboard/encoder/MIDI with one consistent path. */
@@ -700,10 +702,13 @@ static void draw_generic_row(uint32_t row)
         draw_row(y, KNOB_COLOR[row], N[row], 0, b, *p->value, p->lo, p->hi, *p->value);
         return;
     }
-    if (patch.engine == MUTANT_HYBRID_MODEL && page == PAGE_LPG && row < 2u) {
-        fmt_int(b, row == 0 ? *p->value / 10 : *p->value * 127 / 1000);
-        draw_row(y, KNOB_COLOR[row], row == 0 ? "WET %" : "TONE", 0, b,
-                 *p->value, p->lo, p->hi, *p->value);
+    if (patch.engine == MUTANT_HYBRID_MODEL && page == PAGE_LPG) {
+        static const char *const N[] = {"WET %", "TONE", "VOWL2", "SPEED"};
+        const int32_t v = row == 0 ? *p->value / 10 :
+                          row == 1 ? *p->value * 127 / 1000 :
+                          row == 2 ? *p->value * 127 / 100 : *p->value;
+        fmt_int(b, v);
+        draw_row(y, KNOB_COLOR[row], N[row], 0, b, *p->value, p->lo, p->hi, *p->value);
         return;
     }
     if (patch.engine == MUTANT_VOICE_MODEL && page == PAGE_ATTN && row < 3u) {
@@ -948,7 +953,7 @@ static void handle_keys(const fw_input_t *in)
 static void handle_midi_cc(uint32_t cc, uint32_t v)
 {
     if (cc == 1u)
-        mod_wheel = (uint8_t)v;
+        mod_wheel = (uint8_t)v;  /* Manual CHIP VOX vowel morph when SPEED=0 */
     if (cc >= 16u && cc <= 18u)
         *knob_field(cc - 16u) = (int16_t)(v * 1000u / 127u);
     if (cc == 19u)
@@ -960,6 +965,13 @@ static void handle_midi_cc(uint32_t cc, uint32_t v)
                          cc == 22u ? &patch.morph_amt : cc == 23u ? &patch.decay : &patch.colour;
         *field = (int16_t)(cc <= 22u ? (int32_t)v * 200 / 127 - 100 : (int32_t)v * 1000 / 127);
         dirty |= FW_BIT(D_HEADER) | 0x1Eu;
+    }
+    if (patch.engine == MUTANT_HYBRID_MODEL && (cc == 25u || cc == 26u)) {
+        /* Existing GATOR fields are reused only within CHIP VOX:
+         * CC25 destination vowel (0..127), CC26 sweep speed (0..100). */
+        int16_t *field = cc == 25u ? &patch.blend : &patch.spread;
+        *field = (int16_t)(v * 100u / 127u);
+        dirty |= FW_BIT(D_ROW0 + 2u) | FW_BIT(D_ROW0 + 3u);
     }
     if (cc == 120u || cc == 123u) {
         macro_all_notes_off();
@@ -1154,7 +1166,7 @@ static void app_audio(int32_t *lr, uint32_t frames)
     if (patch.engine == MUTANT_LOFI_MODEL)
         lo_render(&patch, &global, bend, lr, frames);
     else if (patch.engine == MUTANT_HYBRID_MODEL)
-        hy_render(&patch, &global, bend, lr, frames);
+        hy_render(&patch, &global, bend, mod_wheel, lr, frames);
     else if (patch.engine == MUTANT_VOICE_MODEL)
         vo_render(&patch, &global, bend, lr, frames);
     else
