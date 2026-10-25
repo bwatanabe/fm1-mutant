@@ -1,0 +1,75 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Requires Settings > Pages > Source: GitHub Actions.
+name: mutant-preview
+
+on:
+  push:
+    branches: [feature/felucca-lofi, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutant-preview
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Python dependencies
+        run: python3 -m pip install "Pillow==11.1.0"
+      - name: Cache JieLi compiler
+        id: toolchain-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.jieli
+          key: jieli-toolchain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/get_toolchain.sh') }}
+      - name: Install compiler
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        run: sh tools/get_toolchain.sh "$HOME/.jieli"
+      - name: Compile Mutant firmware
+        run: |
+          set -euo pipefail
+          ./build.sh --app mutant
+          python3 tools/sim.py --app mutant
+          node web/test_web.mjs build/mutant.fwsc
+      - name: Make preview and updater site
+        run: |
+          set -euo pipefail
+          python3 web/make_mutant_site.py --version "dev-${GITHUB_SHA:0:7}"
+          cd build/mutant-site/firmware
+          sha256sum -c SHA256SUMS
+      - name: Downloadable experimental build
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutant-firmware
+          path: |
+            build/mutant.fwsc
+            build/host/out/mutant.wav
+            build/host/out/mutant.png
+          if-no-files-found: error
+      - name: Bundle preview site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/mutant-site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
