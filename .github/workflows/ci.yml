@@ -5,7 +5,7 @@ name: ci
 
 on:
   push:
-    branches: [main, feature/felucca-lofi, feature/plaits-lofi, feature/jiant-formant, feature/lofi-formant]
+    branches: [main, feature/felucca-lofi, feature/plaits-lofi, feature/jiant-formant, feature/lofi-formant, feature/chip-vox-motion]
   pull_request:
   workflow_dispatch:
 
@@ -78,6 +78,11 @@ jobs:
           python3 tools/sim.py host/hybrid-u.sim
           python3 tools/sim.py host/hybrid-switch.sim
           python3 tools/check_hybrid_wav.py
+          python3 tools/sim.py host/motion-a.sim
+          python3 tools/sim.py host/motion-u.sim
+          python3 tools/sim.py host/motion-auto.sim
+          python3 tools/sim.py host/motion-live.sim
+          python3 tools/check_motion_wav.py
           python3 tools/sim.py --app demo
           python3 tools/sim.py --app mutant
           python3 tools/sim.py --test
