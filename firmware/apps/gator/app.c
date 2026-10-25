@@ -815,6 +815,8 @@ static void note_on(uint32_t note, uint32_t vel)
 {
     if (patch.engine == MUTANT_LOFI_MODEL)
         lo_note_on((uint8_t)note, (uint8_t)vel, &patch);
+    else if (patch.engine == MUTANT_VOICE_MODEL)
+        vo_note_on((uint8_t)note, (uint8_t)vel, &patch);
     else
         macro_note_on((uint8_t)note, (uint8_t)vel);
 }
@@ -825,6 +827,8 @@ static void note_off(uint32_t note)
         return;
     if (patch.engine == MUTANT_LOFI_MODEL)
         lo_note_off((uint8_t)note);
+    else if (patch.engine == MUTANT_VOICE_MODEL)
+        vo_note_off((uint8_t)note);
     else
         macro_note_off((uint8_t)note);
 }
@@ -841,11 +845,12 @@ static void handle_buttons(const fw_input_t *in)
         if (in->pressed & FW_BIT(MAP[i][0]))
             set_page(MAP[i][1]);
     }
-    /* Single-button browser-friendly shortcut: tapping HOME while already
-     * on HOME toggles LOFI / last Plaits model. HOME + note still selects a model. */
+    /* HOME cycles Plaits -> LOFI -> VOICE -> last Plaits model.
+     * One-button access for web emulator; HOME + key still selects exactly. */
     if (was == PAGE_MAIN && (in->pressed & FW_BIT(FW_BTN_HOME)) &&
         !in->keys && !in->keys_pressed) {
-        switch_engine(patch.engine == MUTANT_LOFI_MODEL ? last_plaits_engine : MUTANT_LOFI_MODEL);
+        switch_engine(patch.engine == MUTANT_LOFI_MODEL ? MUTANT_VOICE_MODEL :
+                      patch.engine == MUTANT_VOICE_MODEL ? last_plaits_engine : MUTANT_LOFI_MODEL);
     }
     if ((in->pressed & FW_BIT(FW_BTN_SAVE)) && was == PAGE_SAVE) {
         bank_save(save_slot, in->ms);
@@ -864,6 +869,7 @@ static void handle_buttons(const fw_input_t *in)
         if (!hold) {
             macro_all_notes_off();
             lo_all_off();
+            vo_all_off();
         }
         dirty |= FW_BIT(D_STATUS);
     }
@@ -906,7 +912,8 @@ static void handle_midi_cc(uint32_t cc, uint32_t v)
         switch_engine((int16_t)(v * MUTANT_ENGINES / 128u));
     if (cc >= 16u && cc <= 19u)
         dirty |= FW_BIT(D_HEADER) | 0x1Eu;
-    if (patch.engine == MUTANT_LOFI_MODEL && cc >= 20u && cc <= 24u) {
+    if ((patch.engine == MUTANT_LOFI_MODEL || patch.engine == MUTANT_VOICE_MODEL) &&
+        cc >= 20u && cc <= 24u) {
         int16_t *field = cc == 20u ? &patch.fm_amt : cc == 21u ? &patch.timbre_amt :
                          cc == 22u ? &patch.morph_amt : cc == 23u ? &patch.decay : &patch.colour;
         *field = (int16_t)(cc <= 22u ? (int32_t)v * 200 / 127 - 100 : (int32_t)v * 1000 / 127);
@@ -915,6 +922,7 @@ static void handle_midi_cc(uint32_t cc, uint32_t v)
     if (cc == 120u || cc == 123u) {
         macro_all_notes_off();
         lo_all_off();
+        vo_all_off();
     }
 }
 
@@ -1048,6 +1056,7 @@ static void app_init(void)
         last_plaits_engine = patch.engine;
     macro_init();
     lo_all_off();
+    vo_all_off();
 }
 
 static void app_frame(const fw_input_t *in)
@@ -1061,16 +1070,17 @@ static void app_frame(const fw_input_t *in)
         /* Switching synth families silences the old engine before further MIDI events. */
         macro_all_notes_off();
         lo_all_off();
+        vo_all_off();
         dirty = D_ALL;
     }
     handle_keys(in);
     handle_midi();
     macro_monitor(&mon);
-    if (patch.engine == MUTANT_LOFI_MODEL) {
+    if (patch.engine == MUTANT_LOFI_MODEL || patch.engine == MUTANT_VOICE_MODEL) {
         memset(&mon, 0, sizeof mon);
-        mon.engine = MUTANT_LOFI_MODEL;
-        mon.note10 = (int16_t)lo_current_note10();
-        mon.gate = (uint8_t)lo_current_gate();
+        mon.engine = patch.engine;
+        mon.note10 = (int16_t)(patch.engine == MUTANT_LOFI_MODEL ? lo_current_note10() : vo_current_note10());
+        mon.gate = (uint8_t)(patch.engine == MUTANT_LOFI_MODEL ? lo_current_gate() : vo_current_gate());
     }
     if ((uint32_t)patch.engine != prev_engine)
         dirty |= FW_BIT(D_STATUS);
@@ -1097,6 +1107,8 @@ static void app_audio(int32_t *lr, uint32_t frames)
     }
     if (patch.engine == MUTANT_LOFI_MODEL)
         lo_render(&patch, &global, bend, lr, frames);
+    else if (patch.engine == MUTANT_VOICE_MODEL)
+        vo_render(&patch, &global, bend, lr, frames);
     else
         macro_render(&patch, &global, lr, frames);
     if (scope_ready)
