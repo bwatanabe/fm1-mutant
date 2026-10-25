@@ -1,0 +1,21 @@
+# Mutant v0.8: original JIANT glott excitation -> four formant resonators
+master 900
+midi 0xB0 27 28
+frames 4
+midi 0xB0 16 127
+midi 0xB0 17 112
+midi 0xB0 18 0
+midi 0xB0 20 64
+midi 0xB0 21 64
+midi 0xB0 22 75
+midi 0xB0 23 127
+midi 0xB0 24 90
+midi 0xB0 25 0
+midi 0xB0 26 70
+midi 0x90 60 118
+frames 100
+midi 0x80 60 0
+frames 23
+screen build/host/out/animalvox-glott.ppm
+wav build/host/out/animalvox-glott.wav
+quit
