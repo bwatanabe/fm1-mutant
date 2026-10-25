@@ -248,6 +248,13 @@ def build_app():
     flags.append(f'-DFELUCCA_ID="{PRODUCT}"')
     if VERSION:
         flags.append(f'-DFW_VERSION="{VERSION}"')
+    else:
+        version_file = app_dir() / "version.txt"
+        if version_file.is_file():
+            version = version_file.read_text().strip()
+            if not re.fullmatch(r"[A-Za-z0-9 ._+-]{1,24}", version):
+                raise SystemExit(f"{version_file}: invalid splash version")
+            flags.append(f'-DFW_VERSION="{version}"')
     cxx_objs = build_cxx()
     tc_all(("cc", "-c", FW / "crt0.S", "-o", OUT / "crt0.o"),
            ("cc", "-c", FW / "hal" / "fm1_vec.S", "-o", OUT / "fm1_vec.o"),
