@@ -5,7 +5,7 @@ name: ci
 
 on:
   push:
-    branches: [main, feature/felucca-lofi]
+    branches: [main, feature/felucca-lofi, feature/plaits-lofi]
   pull_request:
   workflow_dispatch:
 
@@ -70,6 +70,7 @@ jobs:
           set -euo pipefail
           python3 tools/sim.py
           python3 tools/sim.py host/models.sim
+          python3 tools/sim.py host/combined.sim
           python3 tools/sim.py --app demo
           python3 tools/sim.py --app mutant
           python3 tools/sim.py --test
