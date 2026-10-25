@@ -1,0 +1,94 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Artifact-only experimental staging, never replaces stable GitHub Pages.
+name: mutant-v07-test
+
+on:
+  push:
+    branches: [feature/jiant-animal]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutant-v07-test
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Python image dependency
+        run: python3 -m pip install "Pillow==11.1.0"
+      - name: Restore compiler cache
+        id: toolchain-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.jieli
+          key: jieli-toolchain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/get_toolchain.sh') }}
+      - name: Fetch compiler on cache miss
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        run: sh tools/get_toolchain.sh "$HOME/.jieli"
+      - name: Compile experimental 28-engine Mutant
+        run: |
+          set -euo pipefail
+          ./build.sh --app gator --name mutant
+          node web/test_web.mjs build/mutant.fwsc
+      - name: Simulate VOICE and check its output
+        run: |
+          set -euo pipefail
+          python3 tools/sim.py host/voice.sim
+          python3 tools/check_voice_wav.py
+          python3 tools/sim.py host/hybrid-a.sim
+          python3 tools/sim.py host/hybrid-u.sim
+          python3 tools/sim.py host/hybrid-switch.sim
+          python3 tools/check_hybrid_wav.py
+          python3 tools/sim.py host/motion-a.sim
+          python3 tools/sim.py host/motion-u.sim
+          python3 tools/sim.py host/motion-auto.sim
+          python3 tools/sim.py host/motion-live.sim
+          python3 tools/check_motion_wav.py
+          python3 tools/sim.py host/animal-cmos.sim
+          python3 tools/sim.py host/animal-pulse.sim
+          python3 tools/sim.py host/animal-whstl.sim
+          python3 tools/sim.py host/animal-wing.sim
+          python3 tools/sim.py host/animal-glott.sim
+          python3 tools/check_animal_wav.py
+      - name: Bundle local browser-preview installer
+        run: |
+          set -euo pipefail
+          python3 web/make_mutant_site.py --version "v0.7-dev-${GITHUB_SHA:0:7}"
+          (cd build/mutant-site/firmware && sha256sum -c SHA256SUMS)
+      - name: Upload experimental firmware and sound tests
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutant-v07-firmware-test
+          path: |
+            build/mutant.fwsc
+            build/host/out/voice.wav
+            build/host/out/voice.png
+            build/host/out/voice-3engines.wav
+            build/host/out/hybrid-a.wav
+            build/host/out/hybrid-u.wav
+            build/host/out/hybrid-switch.wav
+            build/host/out/motion-a.wav
+            build/host/out/motion-u.wav
+            build/host/out/motion-auto.wav
+            build/host/out/motion-live.wav
+            build/host/out/animal-cmos.wav
+            build/host/out/animal-pulse.wav
+            build/host/out/animal-whstl.wav
+            build/host/out/animal-wing.wav
+            build/host/out/animal-glott.wav
+          if-no-files-found: error
+      - name: Upload offline-capable preview/installer website
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutant-v07-preview-site
+          path: build/mutant-site/
+          if-no-files-found: error

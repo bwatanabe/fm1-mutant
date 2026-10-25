@@ -1,6 +1,6 @@
 # FM-1 Mutant combined firmware: Plaits -> LOFI -> Plaits
 master 900
-midi 0xB0 19 127
+midi 0xB0 27 24
 frames 5
 midi 0x90 60 112
 frames 35
@@ -15,7 +15,7 @@ midi 0x80 60 0
 frames 35
 screen build/host/out/combined-lofi.ppm
 wav build/host/out/combined-lofi.wav
-midi 0xB0 19 0
+midi 0xB0 27 0
 frames 4
 midi 0x90 64 112
 frames 50

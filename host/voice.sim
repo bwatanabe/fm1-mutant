@@ -1,7 +1,7 @@
 # FM-1 Mutant v0.4: Plaits -> LOFI -> JIANT VOICE -> Plaits
 master 900
 # VOICE model 26 via MIDI CC19 (value 127).
-midi 0xB0 19 127
+midi 0xB0 27 25
 frames 6
 midi 0x90 60 115
 frames 42
@@ -16,14 +16,14 @@ wav build/host/out/voice.wav
 midi 0x80 60 0
 frames 28
 # Model 25 (LOFI), CC19 v=120.
-midi 0xB0 19 120
+midi 0xB0 27 24
 frames 4
 midi 0x90 64 105
 frames 35
 midi 0x80 64 0
 frames 25
 # Back to Plaits.
-midi 0xB0 19 0
+midi 0xB0 27 0
 frames 4
 midi 0x90 60 115
 frames 40

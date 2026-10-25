@@ -1,0 +1,19 @@
+# v0.7 JIANT ANIMAL WHSTL; model 28 MIDI CC19=127.
+master 900
+midi 0xB0 19 127
+frames 6
+midi 0xB0 16 64
+midi 0xB0 17 108
+midi 0xB0 18 16
+midi 0xB0 20 70
+midi 0xB0 21 78
+midi 0xB0 22 110
+midi 0xB0 23 0
+midi 0xB0 24 70
+midi 0x90 64 117
+frames 122
+midi 0x80 64 0
+frames 32
+screen build/host/out/animal-whstl.ppm
+wav build/host/out/animal-whstl.wav
+quit
