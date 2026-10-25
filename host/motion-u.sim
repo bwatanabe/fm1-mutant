@@ -1,0 +1,22 @@
+# Mutant v0.6: noise chip oscillator through moving formants
+master 900
+midi 0xB0 19 127
+frames 6
+midi 0xB0 16 0
+midi 0xB0 17 105
+midi 0xB0 18 0
+midi 0xB0 20 64
+midi 0xB0 21 64
+midi 0xB0 22 0
+midi 0xB0 23 127
+midi 0xB0 24 120
+midi 0xB0 25 127
+# Fixed U via modulation wheel at 127, speed 0
+midi 0xB0 26 0
+midi 0xB0 1 127
+midi 0x90 60 112
+frames 130
+midi 0x80 60 0
+frames 30
+wav build/host/out/motion-u.wav
+quit
