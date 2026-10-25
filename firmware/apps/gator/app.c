@@ -807,8 +807,15 @@ static void handle_midi_cc(uint32_t cc, uint32_t v)
         mod_wheel = (uint8_t)v;
     if (cc >= 16u && cc <= 18u)
         *knob_field(cc - 16u) = (int16_t)(v * 1000u / 127u);
-    if (cc == 19u)
-        patch.engine = (int16_t)(v * MUTANT_ENGINES / 128u);
+    if (cc == 19u) {
+        const int16_t next = (int16_t)(v * MUTANT_ENGINES / 128u);
+        if (next != patch.engine) {
+            /* MIDI can select the engine and send notes within the same frame. */
+            macro_all_notes_off();
+            lo_all_off();
+            patch.engine = next;
+        }
+    }
     if (cc >= 16u && cc <= 19u)
         dirty |= FW_BIT(D_HEADER) | 0x1Eu;
     if (patch.engine == MUTANT_LOFI_MODEL && cc >= 20u && cc <= 24u) {
