@@ -1,6 +1,6 @@
 # 100% wet A vowel, pulse oscillator; validate LOFI -> JIANT audio
 master 900
-midi 0xB0 19 127
+midi 0xB0 27 26
 frames 5
 midi 0xB0 16 0
 midi 0xB0 17 0
