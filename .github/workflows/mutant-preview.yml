@@ -4,7 +4,7 @@ name: mutant-preview
 
 on:
   push:
-    branches: [feature/felucca-lofi, main]
+    branches: [feature/plaits-lofi]
   workflow_dispatch:
 
 permissions:
@@ -37,8 +37,9 @@ jobs:
       - name: Compile Mutant firmware
         run: |
           set -euo pipefail
-          ./build.sh --app mutant
-          python3 tools/sim.py --app mutant
+          ./build.sh --app gator --name mutant
+          python3 tools/sim.py host/combined.sim --app gator
+          python3 tools/sim.py host/models.sim --app gator
           node web/test_web.mjs build/mutant.fwsc
       - name: Make preview and updater site
         run: |
@@ -52,8 +53,9 @@ jobs:
           name: mutant-firmware
           path: |
             build/mutant.fwsc
-            build/host/out/mutant.wav
-            build/host/out/mutant.png
+            build/host/out/combined-lofi.wav
+            build/host/out/combined-lofi.png
+            build/host/out/combined-plaits.png
           if-no-files-found: error
       - name: Bundle preview site
         uses: actions/upload-pages-artifact@v3
