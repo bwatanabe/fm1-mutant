@@ -13,9 +13,11 @@ typedef struct {
 } mutant_hybrid_filter_t;
 
 static mutant_hybrid_filter_t hy_filter;
+static uint32_t hy_motion_phase;  /* Q32 cycle, reset each key-on */
 
 /* The hybrid stores its independent patch in GATOR's unchanged patch layout.
- * HOME: CHIP, WAVE, VOWEL | ATTN: SHIFT, Q, CRSH | FX: MIX, TONE.
+ * HOME: CHIP, WAVE, VOWEL | ATTN: SHIFT, Q, CRSH
+ * FX: MIX, TONE, VOWL2, SPEED. MIDI CC1 manual morph when SPEED=0.
  * Felucca's LOFI's own oscillator code is not modified.
  * Build an *ephemeral* LOFI source patch: DUTY=64, SWP=VIB=ARP=0.
  */
@@ -35,6 +37,7 @@ static void hy_all_off(void)
     uint32_t i;
     fm1_irq_off();
     for (i = 0; i < 8; ++i) hy_filter.y[i] = 0;
+    hy_motion_phase = 0;
     fm1_irq_on();
 }
 
@@ -52,12 +55,30 @@ static int hy_current_gate(void) { return lo_current_gate(); }
  * same JIANT VOWEL tables, Q controls and shifted F1..F4 design.
  * The excitation is LOFI PCM instead of JIANT's glottal source.
  */
-static void hy_coefficients(const macro_patch_t *p, fres_t r[4], int32_t *og, int32_t *ogk)
+/* Source and destination vowel use unchanged patch fields; CC1 can sweep
+ * between them manually, or SPEED can ping-pong automatically. No change
+ * to JIANT's vowel table or four-formant filter equations. */
+static uint32_t hy_vowel_position(const macro_patch_t *p, uint8_t wheel)
+{
+    const int32_t a = lo_bound(p->morph, 0, 1000) * 127 / 1000;
+    const int32_t b = lo_bound(p->blend, 0, 100) * 127 / 100;
+    uint32_t fraction;
+    if (p->spread > 0) {
+        const uint32_t x = hy_motion_phase >> 15;   /* 0..131071 */
+        fraction = x <= 65535u ? x : 131071u - x; /* 0..65535 */
+    } else {
+        fraction = (uint32_t)wheel * 65535u / 127u;
+    }
+    return (uint32_t)lo_bound(a + (int32_t)(((int64_t)(b - a) * fraction) / 65535), 0, 127);
+}
+
+static void hy_coefficients(const macro_patch_t *p, uint32_t vowel_pos,
+                            fres_t r[4], int32_t *og, int32_t *ogk)
 {
     int32_t f[3], b[3], j;
     const voice_t *v = &lo_tracks[0].v[0];
     const int32_t note16 = v->active ? v->pitch16 : 60 * 16;
-    const uint32_t pos = (uint32_t)(p->morph * 127 / 1000);
+    const uint32_t pos = vowel_pos;
     const int32_t q = p->timbre_amt * 127 / 200 + 64; /* -100..100 -> 0..127 */
     const uint32_t ratio = fmt_ratio((p->fm_amt * 12 / 100) * 16 +
                           ((FMT_FOLOW * (note16 - 60 * 16) * 516) >> 16));
@@ -110,7 +131,7 @@ static int32_t hy_filter_sample(int32_t sample, const fres_t r[4], int32_t og, i
     return soft_knee(lo_bound(k, -200000, 200000), 24000);
 }
 
-static void hy_render(const macro_patch_t *p, const macro_global_t *g, int16_t bend,
+static void hy_render(const macro_patch_t *p, const macro_global_t *g, int16_t bend, uint8_t wheel,
                       int32_t *lr, uint32_t frames)
 {
     const macro_patch_t source = hy_source_patch(p);
@@ -120,11 +141,13 @@ static void hy_render(const macro_patch_t *p, const macro_global_t *g, int16_t b
     uint32_t pos = 0;
     const int32_t mix = lo_bound(p->decay, 0, 1000);
     full_volume.volume = 256;  /* once at final output, rather than twice */
-    hy_coefficients(p, resonators, &og, &ogk);
     while (pos < frames) {
         const uint32_t n = frames - pos > CTL ? CTL : frames - pos;
         int32_t chip[2 * CTL];
         uint32_t i;
+        /* Recalculate JIANT resonator coefficients per 32 samples, not
+         * per-sample, for smooth vowel motion at low CPU cost. */
+        hy_coefficients(p, hy_vowel_position(p, wheel), resonators, &og, &ogk);
         lo_render(&source, &full_volume, bend, chip, n);
         for (i = 0; i < n; ++i) {
             const int32_t dry = chip[2 * i];
@@ -135,6 +158,12 @@ static void hy_render(const macro_patch_t *p, const macro_global_t *g, int16_t b
                                             -32768, 32767);
             lr[2u * (pos + i)] = sample;
             lr[2u * (pos + i) + 1u] = sample;
+        }
+        /* SPEED 1..100 = 0.04..4 Hz for the A->B->A triangle cycle.
+         * At SPEED=0 the phase holds and CC1 controls morph manually. */
+        if (p->spread > 0 && lo_tracks[0].v[0].active) {
+            hy_motion_phase += (uint32_t)(((uint64_t)(uint32_t)lo_bound(p->spread, 0, 100)
+                                          * n * 4u * (1ull << 32)) / (FS * 100u));
         }
         pos += n;
     }
