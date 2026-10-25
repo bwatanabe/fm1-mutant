@@ -165,6 +165,9 @@ def generate():
     if APP in ("mutant", "gator"):
         cmds.append([FW / "apps" / "mutant" / "gen_engine_tables.py", "--fs", "48000" if FS48 else "44100",
                      GEN / "fe_tables.h"])
+    if APP == "gator":
+        cmds.append([FW / "apps" / "gator" / "gen_animal_tables.py", "--fs", "48000" if FS48 else "44100",
+                     GEN / "animal_tables.h"])
     procs = [subprocess.Popen([sys.executable, *map(str, c)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                               text=True) for c in cmds]
     failed = []
