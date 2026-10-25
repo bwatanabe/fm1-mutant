@@ -73,6 +73,7 @@ jobs:
           python3 tools/sim.py host/combined.sim
           python3 tools/sim.py host/combined-clean.sim
           python3 tools/sim.py host/voice.sim
+          python3 tools/check_voice_wav.py
           python3 tools/sim.py --app demo
           python3 tools/sim.py --app mutant
           python3 tools/sim.py --test
