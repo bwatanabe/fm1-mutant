@@ -79,5 +79,8 @@ jobs:
           set -euo pipefail
           node web/test_web.mjs build/gator.fwsc
           node web/test_web.mjs build/mutant.fwsc
+          node --check web/mutant.js
+          python3 web/make_mutant_site.py
+          (cd build/mutant-site/firmware && sha256sum -c SHA256SUMS)
           python3 web/make_site.py
           (cd build/site/firmware && sha256sum -c SHA256SUMS)
