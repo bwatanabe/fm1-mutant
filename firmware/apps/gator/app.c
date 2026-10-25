@@ -1021,7 +1021,12 @@ static void handle_midi_cc(uint32_t cc, uint32_t v)
         *knob_field(cc - 16u) = (int16_t)(v * 1000u / 127u);
     if (cc == 19u)
         switch_engine((int16_t)(v * MUTANT_ENGINES / 128u));
-    if (cc >= 16u && cc <= 19u)
+    /* Stable direct model selection: MIDI CC27 value is the zero-based model
+     * number (0..27).  Unlike CC19's scaled mapping, this does not shift when
+     * new engines are appended to the instrument.  Ideal for OP-XY mapping. */
+    if (cc == 27u && v < MUTANT_ENGINES)
+        switch_engine((int16_t)v);
+    if ((cc >= 16u && cc <= 19u) || cc == 27u)
         dirty |= FW_BIT(D_HEADER) | 0x1Eu;
     if (patch.engine >= MUTANT_LOFI_MODEL && cc >= 20u && cc <= 24u) {
         int16_t *field = cc == 20u ? &patch.fm_amt : cc == 21u ? &patch.timbre_amt :
