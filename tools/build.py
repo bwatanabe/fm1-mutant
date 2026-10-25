@@ -162,8 +162,8 @@ def generate():
     cmds = [[tools / "gen_font.py", GEN / "felucca_font.h"],
             [tools / "gen_tables.py", GEN / "fw_tables.h", "48" if FS48 else "44"],
             [tools / "gen_logo.py", GEN / "fw_logo.h", app_dir() / "logo.png", "--preview", GEN / "logo.png"]]
-    if APP == "mutant":
-        cmds.append([app_dir() / "gen_engine_tables.py", "--fs", "48000" if FS48 else "44100",
+    if APP in ("mutant", "gator"):
+        cmds.append([FW / "apps" / "mutant" / "gen_engine_tables.py", "--fs", "48000" if FS48 else "44100",
                      GEN / "fe_tables.h"])
     procs = [subprocess.Popen([sys.executable, *map(str, c)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                               text=True) for c in cmds]
@@ -248,6 +248,13 @@ def build_app():
     flags.append(f'-DFELUCCA_ID="{PRODUCT}"')
     if VERSION:
         flags.append(f'-DFW_VERSION="{VERSION}"')
+    else:
+        version_file = app_dir() / "version.txt"
+        if version_file.is_file():
+            version = version_file.read_text().strip()
+            if not re.fullmatch(r"[A-Za-z0-9 ._+-]{1,24}", version):
+                raise SystemExit(f"{version_file}: invalid splash version")
+            flags.append(f'-DFW_VERSION="{version}"')
     cxx_objs = build_cxx()
     tc_all(("cc", "-c", FW / "crt0.S", "-o", OUT / "crt0.o"),
            ("cc", "-c", FW / "hal" / "fm1_vec.S", "-o", OUT / "fm1_vec.o"),

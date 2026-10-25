@@ -1,6 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 npi3pak */
 #include "macro.h"
+#define MUTANT_LOFI_MODEL MACRO_ENGINES
+#define MUTANT_ENGINES (MACRO_ENGINES + 1)
+#include "lofi_host.c"
 
 #define PRESETS 16u
 #define BANK_MAGIC 0x4D43524Fu
@@ -36,13 +39,13 @@ typedef struct {
     macro_patch_t preset[PRESETS];
 } bank_t;
 
-static const char *const MODEL_NAME[MACRO_ENGINES] = {
+static const char *const MODEL_NAME[MUTANT_ENGINES] = {
     "VA VCF", "PHASE DIST", "6-OP FM I", "6-OP FM II", "6-OP FM III", "WAVE TERRAIN", "STRING MACH", "CHIPTUNE",
     "VIRTUAL ANLG", "WAVESHAPER", "2-OP FM", "FORMANT", "HARMONIC", "WAVETABLE", "CHORDS", "SPEECH",
-    "SWARM", "NOISE", "PARTICLE", "STRING", "MODAL", "BASS DRUM", "SNARE", "HI-HAT"
+    "SWARM", "NOISE", "PARTICLE", "STRING", "MODAL", "BASS DRUM", "SNARE", "HI-HAT", "LOFI CHIP"
 };
 
-static const char *const MODEL_PARAM[MACRO_ENGINES][3] = {
+static const char *const MODEL_PARAM[MUTANT_ENGINES][3] = {
     {"RESONANCE", "CUTOFF", "WAVE+SUB"}, {"RATIO", "AMOUNT", "ASYMMETRY"},
     {"PATCH", "BRIGHTNESS", "ENVELOPE"}, {"PATCH", "BRIGHTNESS", "ENVELOPE"}, {"PATCH", "BRIGHTNESS", "ENVELOPE"},
     {"TERRAIN", "RADIUS", "OFFSET"}, {"CHORD", "FILTER/CHO", "REGISTER"}, {"CHORD", "ARP/INV", "PULSE"},
@@ -51,16 +54,16 @@ static const char *const MODEL_PARAM[MACRO_ENGINES][3] = {
     {"CHORD", "INVERSION", "WAVEFORM"}, {"SYNTH/WORD", "SPECIES", "SEGMENT"},
     {"PITCH RND", "DENSITY", "GRAIN"}, {"FILTER", "CLOCK", "RESONANCE"}, {"FREQ RND", "DENSITY", "FILTER"},
     {"MATERIAL", "BRIGHTNESS", "DECAY"}, {"MATERIAL", "BRIGHTNESS", "DECAY"}, {"PUNCH", "TONE", "DECAY"},
-    {"NOISE", "TONE", "DECAY"}, {"NOISE", "TONE", "DECAY"}
+    {"NOISE", "TONE", "DECAY"}, {"NOISE", "TONE", "DECAY"}, {"CHIP", "WAVE", "DUTY"}
 };
 
 static const char *const SRC_NAME[SRC_COUNT] = {"OFF", "LFO1", "LFO2", "ENV", "VEL", "NOTE", "MODW", "AFT", "RAND", "GATE"};
 static const char *const DST_NAME[DST_COUNT] = {"OFF", "PITCH", "HARM", "TIMBRE", "MORPH", "MODEL", "LEVEL", "LFO1 RT", "LFO2 RT"};
 static const char *const LFO_NAME[LFO_SHAPES] = {"SINE", "TRI", "SAW", "SQUARE", "S&H", "SMOOTH"};
 static const char *const NOTE_NAME[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
-static const char *const BANK_LETTER[3] = {"A", "B", "C"};
+static const char *const BANK_LETTER[4] = {"A", "B", "C", "D"};
 static const uint16_t KNOB_COLOR[4] = {RGB(40, 124, 255), RGB(30, 204, 112), RGB(255, 255, 255), RGB(255, 98, 26)};
-static const uint16_t BANK_COLOR[3] = {RGB(255, 170, 30), RGB(60, 210, 90), RGB(240, 60, 60)};
+static const uint16_t BANK_COLOR[4] = {RGB(255, 170, 30), RGB(60, 210, 90), RGB(240, 60, 60), RGB(162, 124, 255)};
 static const char *const MODE_NAME[MODES] = {"TRIG", "DRONE", "GATE"};
 static const uint16_t MODE_COLOR[MODES] = {C_HI, RGB(255, 170, 30), RGB(60, 210, 90)};
 static const int16_t MODE_NEXT[MODES] = {MODE_GATE, MODE_TRIG, MODE_DRONE};
@@ -85,6 +88,56 @@ static int shown_edited;
 static uint32_t overloads_seen;
 static const char *flash_msg;
 static uint32_t flash_msg_until;
+static int16_t last_plaits_engine = 0;
+static macro_patch_t plaits_cached, lofi_cached;
+static uint8_t have_plaits_cache, have_lofi_cache;
+
+/* New engine imports should preserve the old preset format.
+ * On FIRST switching from Plaits to LOFI, load Felucca's own clean
+ * PULSE LD starting point, instead of interpreting arbitrary Plaits
+ * parameters as bitcrush/sweep controls. A saved LOFI preset is NOT reset. */
+static void lofi_clean_start(macro_patch_t *p)
+{
+    const preset_t *src = &LOFI_PRESETS[0]; /* PULSE LD, existing upstream preset */
+    p->harmonics = (int16_t)((int32_t)src->e[0] * 1000 / 4);
+    p->timbre = (int16_t)((int32_t)src->e[1] * 1000 / 4);
+    p->morph = (int16_t)((int32_t)src->e[2] * 1000 / 127);
+    p->fm_amt = (int16_t)((int32_t)src->e[3] * 200 / 127 - 100);
+    p->timbre_amt = (int16_t)((int32_t)src->e[4] * 200 / 127 - 100);
+    p->morph_amt = (int16_t)((int32_t)src->e[5] * 200 / 127 - 100);
+    p->decay = (int16_t)((int32_t)src->e[6] * 1000 / 3);
+    p->colour = (int16_t)((int32_t)src->e[7] * 1000 / 127);
+}
+
+/* Switch engines from keyboard/encoder/MIDI with one consistent path. */
+static void switch_engine(int16_t next)
+{
+    const int16_t prior = patch.engine;
+    if (next < 0 || next >= MUTANT_ENGINES || next == prior)
+        return;
+    macro_all_notes_off();
+    lo_all_off();
+    fm1_irq_off();
+    if (prior == MUTANT_LOFI_MODEL) {
+        lofi_cached = patch;
+        have_lofi_cache = 1;
+    } else {
+        plaits_cached = patch;
+        have_plaits_cache = 1;
+        last_plaits_engine = prior;
+    }
+    if (next == MUTANT_LOFI_MODEL) {
+        if (have_lofi_cache)
+            patch = lofi_cached;
+        else
+            lofi_clean_start(&patch);
+    } else if (have_plaits_cache) {
+        patch = plaits_cached;
+    }
+    patch.engine = next;
+    fm1_irq_on();
+    dirty = D_ALL;
+}
 
 static const page_t PAGE_DEF[PAGES] = {
     [PAGE_ATTN] = {"ATTENUVERTERS", {
@@ -212,7 +265,7 @@ static void clamp16(int16_t *v, int32_t lo, int32_t hi) { *v = (int16_t)clampi(*
 static void patch_sanitize(macro_patch_t *p)
 {
     uint32_t i;
-    clamp16(&p->engine, 0, MACRO_ENGINES - 1);
+    clamp16(&p->engine, 0, MUTANT_ENGINES - 1);
     clamp16(&p->harmonics, 0, 1000);
     clamp16(&p->timbre, 0, 1000);
     clamp16(&p->morph, 0, 1000);
@@ -262,6 +315,11 @@ static void preset_select(uint32_t i)
     fm1_irq_off();
     patch = bank.preset[bank.current];
     fm1_irq_on();
+    /* Recalling a preset resets the temporary per-engine edit histories. */
+    have_plaits_cache = 0;
+    have_lofi_cache = 0;
+    if (patch.engine < MUTANT_LOFI_MODEL)
+        last_plaits_engine = patch.engine;
     dirty = D_ALL;
 }
 
@@ -457,9 +515,9 @@ static void draw_main_header(void)
     cv_rect(8, 2, 14, 14, BANK_COLOR[bk]);
     cv_text(11, 0, &FONT_S, BANK_LETTER[bk], C_BLACK);
     fmt_int(b, e % 8 + 1);
-    str_cpy(b + str_len(b), " / 8", sizeof b - str_len(b));
+    str_cpy(b + str_len(b), e == MUTANT_LOFI_MODEL ? " / 1" : " / 8", sizeof b - str_len(b));
     cv_text(28, 0, &FONT_S, b, C_GRAY);
-    for (i = 0; i < MACRO_ENGINES; i++) {
+    for (i = 0; i < MUTANT_ENGINES; i++) {
         const int32_t x = 160 + (i % 8) * 9, y = 2 + (i / 8) * 5;
         cv_rect(x, y, 7, 3, i == e ? BANK_COLOR[i / 8] : C_DIM);
         if (i == mon.engine && i != e)
@@ -483,6 +541,8 @@ static int32_t main_mod(uint32_t row)
 static void draw_main_row(uint32_t row)
 {
     static const char *const LABEL[4] = {"HARM", "TIMBRE", "MORPH", "FREQ"};
+    static const char *const CHIP_LABEL[4] = {"CHIP", "WAVE", "DUTY", "FREQ"};
+    const char *const *names = patch.engine == MUTANT_LOFI_MODEL ? CHIP_LABEL : LABEL;
     char b[16], n[8];
     const uint32_t y = 48u + row * 30u;
     if (row == 3) {
@@ -490,12 +550,15 @@ static void draw_main_row(uint32_t row)
         note_name(n, mon.note10);
         str_cpy(b + str_len(b), " ST  ", sizeof b - str_len(b));
         str_cpy(b + str_len(b), n, sizeof b - str_len(b));
-        draw_row(y, KNOB_COLOR[3], LABEL[3], 0, b, patch.transpose, -24, 24, main_mod(3));
+        draw_row(y, KNOB_COLOR[3], names[3], 0, b, patch.transpose, -24, 24, main_mod(3));
         return;
     }
-    fmt_int(b, *knob_field(row) / 10);
-    draw_row(y, KNOB_COLOR[row], LABEL[row], MODEL_PARAM[patch.engine][row], b, *knob_field(row), 0, 1000,
-             main_mod(row));
+    if (patch.engine == MUTANT_LOFI_MODEL)
+        fmt_int(b, row < 2u ? *knob_field(row) * 4 / 1000 : *knob_field(row) * 127 / 1000);
+    else
+        fmt_int(b, *knob_field(row) / 10);
+    draw_row(y, KNOB_COLOR[row], names[row], patch.engine == MUTANT_LOFI_MODEL ? 0 :
+             MODEL_PARAM[patch.engine][row], b, *knob_field(row), 0, 1000, main_mod(row));
 }
 
 static void draw_text_line(uint32_t y, const char *s, uint16_t c)
@@ -584,6 +647,18 @@ static void draw_generic_row(uint32_t row)
         return;
     }
     format_param(b, sizeof b, p);
+    if (patch.engine == MUTANT_LOFI_MODEL && page == PAGE_ATTN && row < 3u) {
+        static const char *const N[] = {"CRSH", "SWP", "VIB"};
+        fmt_int(b, (*p->value + 100) * 127 / 200);
+        draw_row(y, KNOB_COLOR[row], N[row], 0, b, *p->value, p->lo, p->hi, *p->value);
+        return;
+    }
+    if (patch.engine == MUTANT_LOFI_MODEL && page == PAGE_LPG && row < 2u) {
+        fmt_int(b, *p->value * (row ? 127 : 3) / 1000);
+        draw_row(y, KNOB_COLOR[row], row ? "TONE" : "ARP", 0, b,
+                 *p->value, p->lo, p->hi, *p->value);
+        return;
+    }
     draw_row(y, KNOB_COLOR[row], p->label, 0, b, *p->value, p->lo, p->hi, *p->value);
 }
 
@@ -617,7 +692,7 @@ static void draw_save_row(uint32_t row)
     fmt_int(n, (int32_t)slot + 1);
     str_cpy(b + 3, n, sizeof b - 3);
     str_cpy(b + str_len(b), "  ", sizeof b - str_len(b));
-    str_cpy(b + str_len(b), MODEL_NAME[bank.preset[slot].engine % MACRO_ENGINES], sizeof b - str_len(b));
+    str_cpy(b + str_len(b), MODEL_NAME[bank.preset[slot].engine % MUTANT_ENGINES], sizeof b - str_len(b));
     cv_begin(240, ROW_H, C_BLACK);
     cv_text(8, 6, &FONT_S, b, row == 1 ? C_WHITE : C_DIM);
     cv_blit(0, 48u + row * 30u);
@@ -704,14 +779,20 @@ static void set_page(uint32_t p)
 
 static void note_on(uint32_t note, uint32_t vel)
 {
-    macro_note_on((uint8_t)note, (uint8_t)vel);
+    if (patch.engine == MUTANT_LOFI_MODEL)
+        lo_note_on((uint8_t)note, (uint8_t)vel, &patch);
+    else
+        macro_note_on((uint8_t)note, (uint8_t)vel);
 }
 
 static void note_off(uint32_t note)
 {
     if (hold)
         return;
-    macro_note_off((uint8_t)note);
+    if (patch.engine == MUTANT_LOFI_MODEL)
+        lo_note_off((uint8_t)note);
+    else
+        macro_note_off((uint8_t)note);
 }
 
 static void handle_buttons(const fw_input_t *in)
@@ -725,6 +806,12 @@ static void handle_buttons(const fw_input_t *in)
     for (i = 0; i < FW_NELEM(MAP); i++) {
         if (in->pressed & FW_BIT(MAP[i][0]))
             set_page(MAP[i][1]);
+    }
+    /* Single-button browser-friendly shortcut: tapping HOME while already
+     * on HOME toggles LOFI / last Plaits model. HOME + note still selects a model. */
+    if (was == PAGE_MAIN && (in->pressed & FW_BIT(FW_BTN_HOME)) &&
+        !in->keys && !in->keys_pressed) {
+        switch_engine(patch.engine == MUTANT_LOFI_MODEL ? last_plaits_engine : MUTANT_LOFI_MODEL);
     }
     if ((in->pressed & FW_BIT(FW_BTN_SAVE)) && was == PAGE_SAVE) {
         bank_save(save_slot, in->ms);
@@ -740,8 +827,10 @@ static void handle_buttons(const fw_input_t *in)
     }
     if (in->pressed & FW_BIT(FW_BTN_REC)) {
         hold = !hold;
-        if (!hold)
+        if (!hold) {
             macro_all_notes_off();
+            lo_all_off();
+        }
         dirty |= FW_BIT(D_STATUS);
     }
     if (in->pressed & FW_BIT(FW_BTN_OCT_DOWN))
@@ -763,9 +852,8 @@ static void handle_keys(const fw_input_t *in)
         }
         if (!(in->keys_pressed & FW_BIT(k)))
             continue;
-        if (model_mode && k < MACRO_ENGINES) {
-            patch.engine = (int16_t)k;
-            dirty |= FW_BIT(D_HEADER) | 0x1Eu;
+        if (model_mode && k < MUTANT_ENGINES) {
+            switch_engine((int16_t)k);
             continue;
         }
         key_note[k] = (uint8_t)clampi((int32_t)(FW_KEY_BASE_NOTE + k) + octave * 12, 0, 127);
@@ -781,11 +869,19 @@ static void handle_midi_cc(uint32_t cc, uint32_t v)
     if (cc >= 16u && cc <= 18u)
         *knob_field(cc - 16u) = (int16_t)(v * 1000u / 127u);
     if (cc == 19u)
-        patch.engine = (int16_t)(v * MACRO_ENGINES / 128u);
+        switch_engine((int16_t)(v * MUTANT_ENGINES / 128u));
     if (cc >= 16u && cc <= 19u)
         dirty |= FW_BIT(D_HEADER) | 0x1Eu;
-    if (cc == 120u || cc == 123u)
+    if (patch.engine == MUTANT_LOFI_MODEL && cc >= 20u && cc <= 24u) {
+        int16_t *field = cc == 20u ? &patch.fm_amt : cc == 21u ? &patch.timbre_amt :
+                         cc == 22u ? &patch.morph_amt : cc == 23u ? &patch.decay : &patch.colour;
+        *field = (int16_t)(cc <= 22u ? (int32_t)v * 200 / 127 - 100 : (int32_t)v * 1000 / 127);
+        dirty |= FW_BIT(D_HEADER) | 0x1Eu;
+    }
+    if (cc == 120u || cc == 123u) {
         macro_all_notes_off();
+        lo_all_off();
+    }
 }
 
 static void handle_midi(void)
@@ -815,14 +911,19 @@ static void handle_knobs_main(const fw_input_t *in)
 {
     uint32_t i;
     for (i = 0; i < 3u; i++) {
-        if (adjust(knob_field(i), knob_fast[FW_KNOB_1 + i], 10, 0, 1000))
+        const int32_t step = patch.engine == MUTANT_LOFI_MODEL && i < 2u ? 250 : 10;
+        const int32_t delta = step == 250 ? in->knob[FW_KNOB_1 + i] : knob_fast[FW_KNOB_1 + i];
+        if (adjust(knob_field(i), delta, step, 0, 1000))
             dirty |= FW_BIT(D_ROW0 + i);
     }
     if (adjust(&patch.transpose, in->knob[FW_KNOB_4], 1, -24, 24))
         dirty |= FW_BIT(D_ROW0 + 3u);
-    if (adjust(&patch.engine, in->knob[FW_KNOB_SELECT], 1, 0, MACRO_ENGINES - 1) ||
-        adjust(&patch.engine, in->knob[FW_KNOB_ALGO], 8, 0, MACRO_ENGINES - 1))
-        dirty |= FW_BIT(D_HEADER) | 0x0Eu;
+    {
+        int16_t next = patch.engine;
+        adjust(&next, in->knob[FW_KNOB_SELECT], 1, 0, MUTANT_ENGINES - 1);
+        adjust(&next, in->knob[FW_KNOB_ALGO], 8, 0, MUTANT_ENGINES - 1);
+        switch_engine(next);
+    }
 }
 
 static void handle_knobs_matrix(const fw_input_t *in)
@@ -858,8 +959,12 @@ static void handle_knobs_generic(const fw_input_t *in)
     const page_t *pg = &PAGE_DEF[page];
     uint32_t i;
     for (i = 0; i < 4u; i++) {
-        if (adjust_param(&pg->knob[i], in, FW_KNOB_1 + i))
+        if (patch.engine == MUTANT_LOFI_MODEL && page == PAGE_LPG && i == 0u) {
+            if (adjust(&patch.decay, in->knob[FW_KNOB_1], 334, 0, 1000))
+                dirty |= FW_BIT(D_ROW0);
+        } else if (adjust_param(&pg->knob[i], in, FW_KNOB_1 + i)) {
             dirty |= FW_BIT(D_ROW0 + i);
+        }
     }
     if (adjust_param(&pg->enc[0], in, FW_KNOB_SELECT) | adjust_param(&pg->enc[1], in, FW_KNOB_ALGO))
         dirty |= FW_BIT(D_ENC);
@@ -905,7 +1010,10 @@ static void app_init(void)
     bank_load();
     global = bank.global;
     preset_select(bank.current);
+    if (patch.engine < MUTANT_LOFI_MODEL)
+        last_plaits_engine = patch.engine;
     macro_init();
+    lo_all_off();
 }
 
 static void app_frame(const fw_input_t *in)
@@ -915,9 +1023,21 @@ static void app_frame(const fw_input_t *in)
     global.volume = (int16_t)(in->master * in->master >> 12);
     handle_buttons(in);
     handle_knobs(in);
+    if ((uint32_t)patch.engine != prev_engine) {
+        /* Switching synth families silences the old engine before further MIDI events. */
+        macro_all_notes_off();
+        lo_all_off();
+        dirty = D_ALL;
+    }
     handle_keys(in);
     handle_midi();
     macro_monitor(&mon);
+    if (patch.engine == MUTANT_LOFI_MODEL) {
+        memset(&mon, 0, sizeof mon);
+        mon.engine = MUTANT_LOFI_MODEL;
+        mon.note10 = (int16_t)lo_current_note10();
+        mon.gate = (uint8_t)lo_current_gate();
+    }
     if ((uint32_t)patch.engine != prev_engine)
         dirty |= FW_BIT(D_STATUS);
     if (flash_msg && (int32_t)(in->ms - flash_msg_until) > 0) {
@@ -941,7 +1061,10 @@ static void app_audio(int32_t *lr, uint32_t frames)
         overloads++;
         return;
     }
-    macro_render(&patch, &global, lr, frames);
+    if (patch.engine == MUTANT_LOFI_MODEL)
+        lo_render(&patch, &global, bend, lr, frames);
+    else
+        macro_render(&patch, &global, lr, frames);
     if (scope_ready)
         return;
     for (i = 0; i < SCOPE_N && i < frames; i++)

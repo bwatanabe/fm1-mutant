@@ -1,0 +1,25 @@
+# Validate single-tap HOME -> LOFI with upstream PULSE LD defaults.
+# No simultaneous key/button presses required, usable in web emulator.
+master 900
+frames 3
+btn HOME down
+frames 2
+btn HOME up
+frames 3
+midi 0x90 60 120
+frames 100
+screen build/host/out/combined-clean.ppm
+wav build/host/out/combined-clean.wav
+midi 0x80 60 0
+frames 12
+# One HOME tap on the main page returns to the last Plaits model.
+btn HOME down
+frames 2
+btn HOME up
+frames 3
+midi 0x90 64 110
+frames 30
+midi 0x80 64 0
+frames 8
+wav build/host/out/combined-switch.wav
+quit
