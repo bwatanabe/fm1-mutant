@@ -53,6 +53,12 @@ jobs:
           python3 tools/sim.py host/motion-auto.sim
           python3 tools/sim.py host/motion-live.sim
           python3 tools/check_motion_wav.py
+          python3 tools/sim.py host/animal-cmos.sim
+          python3 tools/sim.py host/animal-pulse.sim
+          python3 tools/sim.py host/animal-whstl.sim
+          python3 tools/sim.py host/animal-wing.sim
+          python3 tools/sim.py host/animal-glott.sim
+          python3 tools/check_animal_wav.py
       - name: Bundle local browser-preview installer
         run: |
           set -euo pipefail
@@ -74,6 +80,11 @@ jobs:
             build/host/out/motion-u.wav
             build/host/out/motion-auto.wav
             build/host/out/motion-live.wav
+            build/host/out/animal-cmos.wav
+            build/host/out/animal-pulse.wav
+            build/host/out/animal-whstl.wav
+            build/host/out/animal-wing.wav
+            build/host/out/animal-glott.wav
           if-no-files-found: error
       - name: Upload offline-capable preview/installer website
         uses: actions/upload-artifact@v4
