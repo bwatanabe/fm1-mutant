@@ -72,12 +72,12 @@ static uint32_t hy_vowel_position(const macro_patch_t *p, uint8_t wheel)
     return (uint32_t)lo_bound(a + (int32_t)(((int64_t)(b - a) * fraction) / 65535), 0, 127);
 }
 
-static void hy_coefficients(const macro_patch_t *p, uint32_t vowel_pos,
-                            fres_t r[4], int32_t *og, int32_t *ogk)
+/* Shared by CHIP VOX and ANIMAL VOX: original JIANT vowel coefficient math.
+ * The argument is the source's active MIDI pitch, not necessarily LOFI. */
+static void hy_coefficients_at_pitch(const macro_patch_t *p, uint32_t vowel_pos,
+                                     int32_t note16, fres_t r[4], int32_t *og, int32_t *ogk)
 {
     int32_t f[3], b[3], j;
-    const voice_t *v = &lo_tracks[0].v[0];
-    const int32_t note16 = v->active ? v->pitch16 : 60 * 16;
     const uint32_t pos = vowel_pos;
     const int32_t q = p->timbre_amt * 127 / 200 + 64; /* -100..100 -> 0..127 */
     const uint32_t ratio = fmt_ratio((p->fm_amt * 12 / 100) * 16 +
@@ -98,14 +98,24 @@ static void hy_coefficients(const macro_patch_t *p, uint32_t vowel_pos,
     *ogk = (*og >> 2) * 12;                /* JIANT PRES shelf with BUZZ at mid */
 }
 
+/* Original CHIP VOX coefficient route retained unchanged. */
+static void hy_coefficients(const macro_patch_t *p, uint32_t vowel_pos,
+                            fres_t r[4], int32_t *og, int32_t *ogk)
+{
+    const voice_t *v = &lo_tracks[0].v[0];
+    hy_coefficients_at_pitch(p, vowel_pos, v->active ? v->pitch16 : 60 * 16, r, og, ogk);
+}
+
 /* One sample of JIANT's F1 -> F2 -> F3 -> F4 Q30 cascade,
  * retaining its order, rounding, scaling, and soft-knee behavior.
  * Only the glottis (x) is replaced with external LOFI output.
  */
-static int32_t hy_filter_sample(int32_t sample, const fres_t r[4], int32_t og, int32_t ogk)
+/* Allow a second independent instance without changing the filter algorithm. */
+static int32_t hy_filter_sample_state(mutant_hybrid_filter_t *state, int32_t sample,
+                                      const fres_t r[4], int32_t og, int32_t ogk)
 {
     int32_t a, k, previous;
-    int32_t *const y = hy_filter.y;
+    int32_t *const y = state->y;
     const int32_t x = lo_bound(sample, -32768, 32767);
     /* Same cascade as formant_render(), using signed multiplication instead
      * of (x << 6) to avoid left shifting a negative signed sample. */
@@ -129,6 +139,11 @@ static int32_t hy_filter_sample(int32_t sample, const fres_t r[4], int32_t og, i
     y[6] = lo_bound(a, -(1 << 28), 1 << 28);
     k = (int32_t)(((int64_t)y[6] * og + (int64_t)(y[6] - y[7]) * ogk) >> 21);
     return soft_knee(lo_bound(k, -200000, 200000), 24000);
+}
+
+static int32_t hy_filter_sample(int32_t sample, const fres_t r[4], int32_t og, int32_t ogk)
+{
+    return hy_filter_sample_state(&hy_filter, sample, r, og, ogk);
 }
 
 static void hy_render(const macro_patch_t *p, const macro_global_t *g, int16_t bend, uint8_t wheel,

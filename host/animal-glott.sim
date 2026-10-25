@@ -1,6 +1,6 @@
 # v0.7 JIANT ANIMAL GLOTT; model 28 MIDI CC19=127.
 master 900
-midi 0xB0 19 127
+midi 0xB0 27 27
 frames 6
 midi 0xB0 16 127
 midi 0xB0 17 108

@@ -5,11 +5,13 @@
 #define MUTANT_VOICE_MODEL (MACRO_ENGINES + 1)
 #define MUTANT_HYBRID_MODEL (MACRO_ENGINES + 2)
 #define MUTANT_ANIMAL_MODEL (MACRO_ENGINES + 3)
-#define MUTANT_ENGINES (MACRO_ENGINES + 4)
+#define MUTANT_ANIMAL_VOX_MODEL (MACRO_ENGINES + 4)
+#define MUTANT_ENGINES (MACRO_ENGINES + 5)
 #include "lofi_host.c"
 #include "voice_host.c"
 #include "hybrid_host.c"
 #include "animal_host.c"
+#include "animal_vox_host.c"
 
 #define PRESETS 16u
 #define BANK_MAGIC 0x4D43524Fu
@@ -48,7 +50,7 @@ typedef struct {
 static const char *const MODEL_NAME[MUTANT_ENGINES] = {
     "VA VCF", "PHASE DIST", "6-OP FM I", "6-OP FM II", "6-OP FM III", "WAVE TERRAIN", "STRING MACH", "CHIPTUNE",
     "VIRTUAL ANLG", "WAVESHAPER", "2-OP FM", "FORMANT", "HARMONIC", "WAVETABLE", "CHORDS", "SPEECH",
-    "SWARM", "NOISE", "PARTICLE", "STRING", "MODAL", "BASS DRUM", "SNARE", "HI-HAT", "LOFI CHIP", "JIANT VOICE", "CHIP VOX", "ANIMAL"
+    "SWARM", "NOISE", "PARTICLE", "STRING", "MODAL", "BASS DRUM", "SNARE", "HI-HAT", "LOFI CHIP", "JIANT VOICE", "CHIP VOX", "ANIMAL", "ANIMAL VOX"
 };
 
 static const char *const MODEL_PARAM[MUTANT_ENGINES][3] = {
@@ -60,7 +62,7 @@ static const char *const MODEL_PARAM[MUTANT_ENGINES][3] = {
     {"CHORD", "INVERSION", "WAVEFORM"}, {"SYNTH/WORD", "SPECIES", "SEGMENT"},
     {"PITCH RND", "DENSITY", "GRAIN"}, {"FILTER", "CLOCK", "RESONANCE"}, {"FREQ RND", "DENSITY", "FILTER"},
     {"MATERIAL", "BRIGHTNESS", "DECAY"}, {"MATERIAL", "BRIGHTNESS", "DECAY"}, {"PUNCH", "TONE", "DECAY"},
-    {"NOISE", "TONE", "DECAY"}, {"NOISE", "TONE", "DECAY"}, {"CHIP", "WAVE", "DUTY"}, {"VOWEL", "VOWL2", "TALK"}, {"CHIP", "WAVE", "VOWEL"}, {"MODE", "PRESS", "CHAOS"}
+    {"NOISE", "TONE", "DECAY"}, {"NOISE", "TONE", "DECAY"}, {"CHIP", "WAVE", "DUTY"}, {"VOWEL", "VOWL2", "TALK"}, {"CHIP", "WAVE", "VOWEL"}, {"MODE", "PRESS", "CHAOS"}, {"MODE", "CALL", "VOWEL"}
 };
 
 static const char *const SRC_NAME[SRC_COUNT] = {"OFF", "LFO1", "LFO2", "ENV", "VEL", "NOTE", "MODW", "AFT", "RAND", "GATE"};
@@ -95,8 +97,9 @@ static uint32_t overloads_seen;
 static const char *flash_msg;
 static uint32_t flash_msg_until;
 static int16_t last_plaits_engine = 0;
-static macro_patch_t plaits_cached, lofi_cached, voice_cached, hybrid_cached, animal_cached;
-static uint8_t have_plaits_cache, have_lofi_cache, have_voice_cache, have_hybrid_cache, have_animal_cache;
+static macro_patch_t plaits_cached, lofi_cached, voice_cached, hybrid_cached, animal_cached, animal_vox_cached;
+static uint8_t have_plaits_cache, have_lofi_cache, have_voice_cache, have_hybrid_cache, have_animal_cache,
+               have_animal_vox_cache;
 
 /* New engine imports should preserve the old preset format.
  * On FIRST switching from Plaits to LOFI, load Felucca's own clean
@@ -158,6 +161,23 @@ static void animal_clean_start(macro_patch_t *p)
     p->colour = 500;
 }
 
+/* First ANIMAL VOX patch: original JIANT CMOS bird as the source, but
+ * filtered through the A vowel at 85% wet.
+ * FX also retains independent RATE, GROUP and TEMP settings. */
+static void animal_vox_clean_start(macro_patch_t *p)
+{
+    p->harmonics = 0;          /* CMOS bird */
+    p->timbre = (int16_t)(90 * 1000 / 127); /* TOUCH / CALL */
+    p->morph = 0;              /* A vowel */
+    p->fm_amt = 0;             /* no formant shift */
+    p->timbre_amt = 0;         /* mid formant Q */
+    p->morph_amt = -100;       /* source COUPLE / CHAOS off */
+    p->decay = 850;            /* WET 85% */
+    p->colour = (int16_t)(74 * 1000 / 127); /* original CMOS BIRD RATE */
+    p->blend = 0;             /* GROUP hold */
+    p->spread = 55;           /* TEMP / FM approx 22/40 */
+}
+
 /* Switch engines from keyboard/encoder/MIDI with one consistent path. */
 static void switch_engine(int16_t next)
 {
@@ -169,6 +189,7 @@ static void switch_engine(int16_t next)
     vo_all_off();
     hy_all_off();
     an_all_off();
+    av_all_off();
     fm1_irq_off();
     if (prior == MUTANT_LOFI_MODEL) {
         lofi_cached = patch; have_lofi_cache = 1;
@@ -178,6 +199,8 @@ static void switch_engine(int16_t next)
         hybrid_cached = patch; have_hybrid_cache = 1;
     } else if (prior == MUTANT_ANIMAL_MODEL) {
         animal_cached = patch; have_animal_cache = 1;
+    } else if (prior == MUTANT_ANIMAL_VOX_MODEL) {
+        animal_vox_cached = patch; have_animal_vox_cache = 1;
     } else {
         plaits_cached = patch; have_plaits_cache = 1;
         last_plaits_engine = prior;
@@ -194,6 +217,9 @@ static void switch_engine(int16_t next)
     } else if (next == MUTANT_ANIMAL_MODEL) {
         if (have_animal_cache) patch = animal_cached;
         else animal_clean_start(&patch);
+    } else if (next == MUTANT_ANIMAL_VOX_MODEL) {
+        if (have_animal_vox_cache) patch = animal_vox_cached;
+        else animal_vox_clean_start(&patch);
     } else if (have_plaits_cache) {
         patch = plaits_cached;
     }
@@ -384,6 +410,7 @@ static void preset_select(uint32_t i)
     have_voice_cache = 0;
     have_hybrid_cache = 0;
     have_animal_cache = 0;
+    have_animal_vox_cache = 0;
     if (patch.engine < MUTANT_LOFI_MODEL)
         last_plaits_engine = patch.engine;
     dirty = D_ALL;
@@ -581,7 +608,7 @@ static void draw_main_header(void)
     cv_rect(8, 2, 14, 14, BANK_COLOR[bk]);
     cv_text(11, 0, &FONT_S, BANK_LETTER[bk], C_BLACK);
     fmt_int(b, e % 8 + 1);
-    str_cpy(b + str_len(b), e >= MUTANT_LOFI_MODEL ? " / 4" : " / 8", sizeof b - str_len(b));
+    str_cpy(b + str_len(b), e >= MUTANT_LOFI_MODEL ? " / 5" : " / 8", sizeof b - str_len(b));
     cv_text(28, 0, &FONT_S, b, C_GRAY);
     for (i = 0; i < MUTANT_ENGINES; i++) {
         const int32_t x = 160 + (i % 8) * 9, y = 2 + (i / 8) * 5;
@@ -610,6 +637,7 @@ static void draw_main_row(uint32_t row)
     static const char *const CHIP_LABEL[4] = {"CHIP", "WAVE", "DUTY", "FREQ"};
     static const char *const VOICE_LABEL[4] = {"VOWEL", "VOWL2", "TALK", "FREQ"};
     static const char *const HYBRID_LABEL[4] = {"CHIP", "WAVE", "VOWEL", "FREQ"};
+    static const char *const ANIMAL_VOX_LABEL[4] = {"MODE", "CALL", "VOWEL", "FREQ"};
     static const char *const ANIMAL_LABEL[5][4] = {
         {"MODE", "TOUCH", "COUPLE", "FREQ"},
         {"MODE", "CLICK", "Q", "FREQ"},
@@ -621,7 +649,8 @@ static void draw_main_row(uint32_t row)
     const char *const *names = patch.engine == MUTANT_LOFI_MODEL ? CHIP_LABEL :
                                patch.engine == MUTANT_VOICE_MODEL ? VOICE_LABEL :
                                patch.engine == MUTANT_HYBRID_MODEL ? HYBRID_LABEL :
-                               patch.engine == MUTANT_ANIMAL_MODEL ? ANIMAL_LABEL[animal_mode] : LABEL;
+                               patch.engine == MUTANT_ANIMAL_MODEL ? ANIMAL_LABEL[animal_mode] :
+                               patch.engine == MUTANT_ANIMAL_VOX_MODEL ? ANIMAL_VOX_LABEL : LABEL;
     char b[16], n[8];
     const uint32_t y = 48u + row * 30u;
     if (row == 3) {
@@ -632,7 +661,7 @@ static void draw_main_row(uint32_t row)
         draw_row(y, KNOB_COLOR[3], names[3], 0, b, patch.transpose, -24, 24, main_mod(3));
         return;
     }
-    if (patch.engine == MUTANT_ANIMAL_MODEL) {
+    if (patch.engine == MUTANT_ANIMAL_MODEL || patch.engine == MUTANT_ANIMAL_VOX_MODEL) {
         if (row == 0)
             str_cpy(b, N_ANIMAL_MODE[animal_mode], sizeof b);
         else
@@ -734,6 +763,21 @@ static void draw_generic_row(uint32_t row)
         return;
     }
     format_param(b, sizeof b, p);
+    if (patch.engine == MUTANT_ANIMAL_VOX_MODEL && page == PAGE_ATTN && row < 3u) {
+        static const char *const N[] = {"SHIFT", "Q", "CHAOS"};
+        fmt_int(b, row == 0u ? *p->value * 12 / 100 : (*p->value + 100) * 127 / 200);
+        draw_row(y, KNOB_COLOR[row], N[row], 0, b, *p->value, p->lo, p->hi, *p->value);
+        return;
+    }
+    if (patch.engine == MUTANT_ANIMAL_VOX_MODEL && page == PAGE_LPG) {
+        static const char *const N[] = {"WET %", "RATE", "GROUP", "TEMP/FM"};
+        const int32_t v = row == 0u ? *p->value / 10 :
+                          row == 1u ? *p->value * 127 / 1000 :
+                          row == 2u ? *p->value * 15 / 100 : *p->value * 40 / 100;
+        fmt_int(b, v);
+        draw_row(y, KNOB_COLOR[row], N[row], 0, b, *p->value, p->lo, p->hi, *p->value);
+        return;
+    }
     if (patch.engine == MUTANT_ANIMAL_MODEL && page == PAGE_ATTN && row < 3u) {
         const uint32_t mode = (uint32_t)(patch.harmonics * 4 / 1000);
         const char *label = row == 0u ? (mode == AN_CMOS ? "CAP" : "SIZE") :
@@ -918,6 +962,8 @@ static void note_on(uint32_t note, uint32_t vel)
         hy_note_on((uint8_t)note, (uint8_t)vel, &patch);
     else if (patch.engine == MUTANT_ANIMAL_MODEL)
         an_note_on((uint8_t)note, (uint8_t)vel, &patch);
+    else if (patch.engine == MUTANT_ANIMAL_VOX_MODEL)
+        av_note_on((uint8_t)note, (uint8_t)vel, &patch);
     else if (patch.engine == MUTANT_VOICE_MODEL)
         vo_note_on((uint8_t)note, (uint8_t)vel, &patch);
     else
@@ -934,6 +980,8 @@ static void note_off(uint32_t note)
         hy_note_off((uint8_t)note);
     else if (patch.engine == MUTANT_ANIMAL_MODEL)
         an_note_off((uint8_t)note);
+    else if (patch.engine == MUTANT_ANIMAL_VOX_MODEL)
+        av_note_off((uint8_t)note);
     else if (patch.engine == MUTANT_VOICE_MODEL)
         vo_note_off((uint8_t)note);
     else
@@ -952,14 +1000,15 @@ static void handle_buttons(const fw_input_t *in)
         if (in->pressed & FW_BIT(MAP[i][0]))
             set_page(MAP[i][1]);
     }
-    /* HOME cycles Plaits -> LOFI -> VOICE -> HYBRID -> ANIMAL -> last Plaits model.
+    /* HOME cycles Plaits -> LOFI -> VOICE -> CHIP VOX -> ANIMAL -> ANIMAL VOX -> Plaits.
      * One-button access for web emulator; HOME + key still selects exactly. */
     if (was == PAGE_MAIN && (in->pressed & FW_BIT(FW_BTN_HOME)) &&
         !in->keys && !in->keys_pressed) {
         switch_engine(patch.engine == MUTANT_LOFI_MODEL ? MUTANT_VOICE_MODEL :
                       patch.engine == MUTANT_VOICE_MODEL ? MUTANT_HYBRID_MODEL :
                       patch.engine == MUTANT_HYBRID_MODEL ? MUTANT_ANIMAL_MODEL :
-                      patch.engine == MUTANT_ANIMAL_MODEL ? last_plaits_engine : MUTANT_LOFI_MODEL);
+                      patch.engine == MUTANT_ANIMAL_MODEL ? MUTANT_ANIMAL_VOX_MODEL :
+                      patch.engine == MUTANT_ANIMAL_VOX_MODEL ? last_plaits_engine : MUTANT_LOFI_MODEL);
     }
     if ((in->pressed & FW_BIT(FW_BTN_SAVE)) && was == PAGE_SAVE) {
         bank_save(save_slot, in->ms);
@@ -981,6 +1030,7 @@ static void handle_buttons(const fw_input_t *in)
             vo_all_off();
             hy_all_off();
             an_all_off();
+            av_all_off();
         }
         dirty |= FW_BIT(D_STATUS);
     }
@@ -1022,7 +1072,7 @@ static void handle_midi_cc(uint32_t cc, uint32_t v)
     if (cc == 19u)
         switch_engine((int16_t)(v * MUTANT_ENGINES / 128u));
     /* Stable direct model selection: MIDI CC27 value is the zero-based model
-     * number (0..27).  Unlike CC19's scaled mapping, this does not shift when
+     * number (0..28).  Unlike CC19's scaled mapping, this does not shift when
      * new engines are appended to the instrument.  Ideal for OP-XY mapping. */
     if (cc == 27u && v < MUTANT_ENGINES)
         switch_engine((int16_t)v);
@@ -1033,6 +1083,12 @@ static void handle_midi_cc(uint32_t cc, uint32_t v)
                          cc == 22u ? &patch.morph_amt : cc == 23u ? &patch.decay : &patch.colour;
         *field = (int16_t)(cc <= 22u ? (int32_t)v * 200 / 127 - 100 : (int32_t)v * 1000 / 127);
         dirty |= FW_BIT(D_HEADER) | 0x1Eu;
+    }
+    if (patch.engine == MUTANT_ANIMAL_VOX_MODEL && (cc == 25u || cc == 26u)) {
+        /* CC25 GROUP and CC26 TEMP / FM for ANIMAL VOX only. */
+        int16_t *field = cc == 25u ? &patch.blend : &patch.spread;
+        *field = (int16_t)(v * 100u / 127u);
+        dirty |= FW_BIT(D_ROW0 + 2u) | FW_BIT(D_ROW0 + 3u);
     }
     if (patch.engine == MUTANT_HYBRID_MODEL && (cc == 25u || cc == 26u)) {
         /* Existing GATOR fields are reused only within CHIP VOX:
@@ -1047,6 +1103,7 @@ static void handle_midi_cc(uint32_t cc, uint32_t v)
         vo_all_off();
         hy_all_off();
         an_all_off();
+        av_all_off();
     }
 }
 
@@ -1079,7 +1136,8 @@ static void handle_knobs_main(const fw_input_t *in)
     for (i = 0; i < 3u; i++) {
         const int32_t step = (patch.engine == MUTANT_LOFI_MODEL ||
                               patch.engine == MUTANT_HYBRID_MODEL ||
-                              patch.engine == MUTANT_ANIMAL_MODEL) && i == 0u ? 250 : 10;
+                              patch.engine == MUTANT_ANIMAL_MODEL ||
+                              patch.engine == MUTANT_ANIMAL_VOX_MODEL) && i == 0u ? 250 : 10;
         const int32_t delta = step == 250 ? in->knob[FW_KNOB_1 + i] : knob_fast[FW_KNOB_1 + i];
         if (adjust(knob_field(i), delta, step, 0, 1000))
             dirty |= FW_BIT(D_ROW0 + i);
@@ -1185,6 +1243,7 @@ static void app_init(void)
     vo_all_off();
     hy_all_off();
     an_all_off();
+    av_all_off();
 }
 
 static void app_frame(const fw_input_t *in)
@@ -1201,6 +1260,7 @@ static void app_frame(const fw_input_t *in)
         vo_all_off();
         hy_all_off();
         an_all_off();
+        av_all_off();
         dirty = D_ALL;
     }
     handle_keys(in);
@@ -1210,9 +1270,9 @@ static void app_frame(const fw_input_t *in)
         memset(&mon, 0, sizeof mon);
         mon.engine = patch.engine;
         mon.note10 = (int16_t)(patch.engine == MUTANT_VOICE_MODEL ? vo_current_note10() :
-                               patch.engine == MUTANT_ANIMAL_MODEL ? an_note10() : lo_current_note10());
+                               patch.engine >= MUTANT_ANIMAL_MODEL ? av_note10() : lo_current_note10());
         mon.gate = (uint8_t)(patch.engine == MUTANT_VOICE_MODEL ? vo_current_gate() :
-                              patch.engine == MUTANT_ANIMAL_MODEL ? an_gate() : lo_current_gate());
+                              patch.engine >= MUTANT_ANIMAL_MODEL ? av_gate() : lo_current_gate());
     }
     if ((uint32_t)patch.engine != prev_engine)
         dirty |= FW_BIT(D_STATUS);
@@ -1245,6 +1305,8 @@ static void app_audio(int32_t *lr, uint32_t frames)
         vo_render(&patch, &global, bend, lr, frames);
     else if (patch.engine == MUTANT_ANIMAL_MODEL)
         an_render(&patch, &global, bend, lr, frames);
+    else if (patch.engine == MUTANT_ANIMAL_VOX_MODEL)
+        av_render(&patch, &global, bend, lr, frames);
     else
         macro_render(&patch, &global, lr, frames);
     if (scope_ready)
