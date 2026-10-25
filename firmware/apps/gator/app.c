@@ -610,11 +610,18 @@ static void draw_main_row(uint32_t row)
     static const char *const CHIP_LABEL[4] = {"CHIP", "WAVE", "DUTY", "FREQ"};
     static const char *const VOICE_LABEL[4] = {"VOWEL", "VOWL2", "TALK", "FREQ"};
     static const char *const HYBRID_LABEL[4] = {"CHIP", "WAVE", "VOWEL", "FREQ"};
-    static const char *const ANIMAL_LABEL[4] = {"MODE", "PRESS", "CHAOS", "FREQ"};
+    static const char *const ANIMAL_LABEL[5][4] = {
+        {"MODE", "TOUCH", "COUPLE", "FREQ"},
+        {"MODE", "CLICK", "Q", "FREQ"},
+        {"MODE", "PRESS", "CHAOS", "FREQ"},
+        {"MODE", "BUZZ", "DRIFT", "FREQ"},
+        {"MODE", "MOUTH", "ROUGH", "FREQ"}
+    };
+    const uint32_t animal_mode = (uint32_t)(patch.harmonics * 4 / 1000);
     const char *const *names = patch.engine == MUTANT_LOFI_MODEL ? CHIP_LABEL :
                                patch.engine == MUTANT_VOICE_MODEL ? VOICE_LABEL :
                                patch.engine == MUTANT_HYBRID_MODEL ? HYBRID_LABEL :
-                               patch.engine == MUTANT_ANIMAL_MODEL ? ANIMAL_LABEL : LABEL;
+                               patch.engine == MUTANT_ANIMAL_MODEL ? ANIMAL_LABEL[animal_mode] : LABEL;
     char b[16], n[8];
     const uint32_t y = 48u + row * 30u;
     if (row == 3) {
@@ -625,8 +632,12 @@ static void draw_main_row(uint32_t row)
         draw_row(y, KNOB_COLOR[3], names[3], 0, b, patch.transpose, -24, 24, main_mod(3));
         return;
     }
-    if (patch.engine == MUTANT_ANIMAL_MODEL)
-        fmt_int(b, row == 0 ? *knob_field(row) * 4 / 1000 : *knob_field(row) * 127 / 1000);
+    if (patch.engine == MUTANT_ANIMAL_MODEL) {
+        if (row == 0)
+            str_cpy(b, N_ANIMAL_MODE[animal_mode], sizeof b);
+        else
+            fmt_int(b, *knob_field(row) * 127 / 1000);
+    }
     else if (patch.engine == MUTANT_LOFI_MODEL || patch.engine == MUTANT_HYBRID_MODEL)
         fmt_int(b, row < 2u ? *knob_field(row) * 4 / 1000 : *knob_field(row) * 127 / 1000);
     else if (patch.engine == MUTANT_VOICE_MODEL)
@@ -724,14 +735,21 @@ static void draw_generic_row(uint32_t row)
     }
     format_param(b, sizeof b, p);
     if (patch.engine == MUTANT_ANIMAL_MODEL && page == PAGE_ATTN && row < 3u) {
-        static const char *const N[] = {"SIZE / CAP", "SWEEP", "RATE"};
+        const uint32_t mode = (uint32_t)(patch.harmonics * 4 / 1000);
+        const char *label = row == 0u ? (mode == AN_CMOS ? "CAP" : "SIZE") :
+                            row == 1u ? (mode == AN_CMOS ? "HYST" :
+                                           mode == AN_PULSE ? "DETUNE" :
+                                           mode == AN_WING ? "DOPPLR" : "SWEEP") : "RATE";
         fmt_int(b, row == 1u ? *p->value * 64 / 100 : (*p->value + 100) * 127 / 200);
-        draw_row(y, KNOB_COLOR[row], N[row], 0, b, *p->value, p->lo, p->hi, *p->value);
+        draw_row(y, KNOB_COLOR[row], label, 0, b, *p->value, p->lo, p->hi, *p->value);
         return;
     }
     if (patch.engine == MUTANT_ANIMAL_MODEL && page == PAGE_LPG && row < 2u) {
         fmt_int(b, row == 0u ? *p->value * 15 / 1000 : *p->value * 40 / 1000);
-        draw_row(y, KNOB_COLOR[row], row == 0u ? "GROUP" : "TEMP / FM", 0, b,
+        draw_row(y, KNOB_COLOR[row], row == 0u ? "GROUP" :
+                 patch.harmonics * 4 / 1000 == AN_CMOS ? "FM" :
+                 patch.harmonics * 4 / 1000 == AN_GLOTT ? "AIR" : "TEMP",
+                 0, b,
                  *p->value, p->lo, p->hi, *p->value);
         return;
     }
