@@ -1,0 +1,25 @@
+# CHIP VOX -> VOICE -> LOFI -> original Plaits
+master 900
+midi 0xB0 19 127
+frames 3
+midi 0x90 62 115
+frames 32
+midi 0x80 62 0
+midi 0xB0 19 121
+frames 3
+midi 0x90 65 110
+frames 32
+midi 0x80 65 0
+midi 0xB0 19 115
+frames 3
+midi 0x90 67 110
+frames 32
+midi 0x80 67 0
+midi 0xB0 19 0
+frames 3
+midi 0x90 60 110
+frames 40
+midi 0x80 60 0
+frames 18
+wav build/host/out/hybrid-switch.wav
+quit
