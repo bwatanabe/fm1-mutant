@@ -162,7 +162,7 @@ def generate():
     cmds = [[tools / "gen_font.py", GEN / "felucca_font.h"],
             [tools / "gen_tables.py", GEN / "fw_tables.h", "48" if FS48 else "44"],
             [tools / "gen_logo.py", GEN / "fw_logo.h", app_dir() / "logo.png", "--preview", GEN / "logo.png"]]
-    if APP == "mutant":
+    if APP in ("mutant", "gator"):
         cmds.append([app_dir() / "gen_engine_tables.py", "--fs", "48000" if FS48 else "44100",
                      GEN / "fe_tables.h"])
     procs = [subprocess.Popen([sys.executable, *map(str, c)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
