@@ -2,8 +2,10 @@
  * Copyright (C) 2026 npi3pak */
 #include "macro.h"
 #define MUTANT_LOFI_MODEL MACRO_ENGINES
-#define MUTANT_ENGINES (MACRO_ENGINES + 1)
+#define MUTANT_VOICE_MODEL (MACRO_ENGINES + 1)
+#define MUTANT_ENGINES (MACRO_ENGINES + 2)
 #include "lofi_host.c"
+#include "voice_host.c"
 
 #define PRESETS 16u
 #define BANK_MAGIC 0x4D43524Fu
@@ -42,7 +44,7 @@ typedef struct {
 static const char *const MODEL_NAME[MUTANT_ENGINES] = {
     "VA VCF", "PHASE DIST", "6-OP FM I", "6-OP FM II", "6-OP FM III", "WAVE TERRAIN", "STRING MACH", "CHIPTUNE",
     "VIRTUAL ANLG", "WAVESHAPER", "2-OP FM", "FORMANT", "HARMONIC", "WAVETABLE", "CHORDS", "SPEECH",
-    "SWARM", "NOISE", "PARTICLE", "STRING", "MODAL", "BASS DRUM", "SNARE", "HI-HAT", "LOFI CHIP"
+    "SWARM", "NOISE", "PARTICLE", "STRING", "MODAL", "BASS DRUM", "SNARE", "HI-HAT", "LOFI CHIP", "JIANT VOICE"
 };
 
 static const char *const MODEL_PARAM[MUTANT_ENGINES][3] = {
@@ -54,7 +56,7 @@ static const char *const MODEL_PARAM[MUTANT_ENGINES][3] = {
     {"CHORD", "INVERSION", "WAVEFORM"}, {"SYNTH/WORD", "SPECIES", "SEGMENT"},
     {"PITCH RND", "DENSITY", "GRAIN"}, {"FILTER", "CLOCK", "RESONANCE"}, {"FREQ RND", "DENSITY", "FILTER"},
     {"MATERIAL", "BRIGHTNESS", "DECAY"}, {"MATERIAL", "BRIGHTNESS", "DECAY"}, {"PUNCH", "TONE", "DECAY"},
-    {"NOISE", "TONE", "DECAY"}, {"NOISE", "TONE", "DECAY"}, {"CHIP", "WAVE", "DUTY"}
+    {"NOISE", "TONE", "DECAY"}, {"NOISE", "TONE", "DECAY"}, {"CHIP", "WAVE", "DUTY"}, {"VOWEL", "VOWL2", "TALK"}
 };
 
 static const char *const SRC_NAME[SRC_COUNT] = {"OFF", "LFO1", "LFO2", "ENV", "VEL", "NOTE", "MODW", "AFT", "RAND", "GATE"};
@@ -89,8 +91,8 @@ static uint32_t overloads_seen;
 static const char *flash_msg;
 static uint32_t flash_msg_until;
 static int16_t last_plaits_engine = 0;
-static macro_patch_t plaits_cached, lofi_cached;
-static uint8_t have_plaits_cache, have_lofi_cache;
+static macro_patch_t plaits_cached, lofi_cached, voice_cached;
+static uint8_t have_plaits_cache, have_lofi_cache, have_voice_cache;
 
 /* New engine imports should preserve the old preset format.
  * On FIRST switching from Plaits to LOFI, load Felucca's own clean
@@ -109,6 +111,19 @@ static void lofi_clean_start(macro_patch_t *p)
     p->colour = (int16_t)((int32_t)src->e[7] * 1000 / 127);
 }
 
+/* From JIANT's existing VOX LEAD preset: [32,0,0,2,90,8,72,0].
+ * Values are scaled into GATOR's unchanged persistent patch structure. */
+static void voice_clean_start(macro_patch_t *p)
+{
+    p->harmonics = (int16_t)(32 * 1000 / 127);
+    p->timbre = 0; p->morph = 0;
+    p->fm_amt = (int16_t)(2 * 100 / 12);
+    p->timbre_amt = (int16_t)(90 * 200 / 127 - 100);
+    p->morph_amt = (int16_t)(8 * 200 / 127 - 100);
+    p->decay = (int16_t)(72 * 1000 / 127);
+    p->colour = 0;
+}
+
 /* Switch engines from keyboard/encoder/MIDI with one consistent path. */
 static void switch_engine(int16_t next)
 {
@@ -117,20 +132,22 @@ static void switch_engine(int16_t next)
         return;
     macro_all_notes_off();
     lo_all_off();
+    vo_all_off();
     fm1_irq_off();
     if (prior == MUTANT_LOFI_MODEL) {
-        lofi_cached = patch;
-        have_lofi_cache = 1;
+        lofi_cached = patch; have_lofi_cache = 1;
+    } else if (prior == MUTANT_VOICE_MODEL) {
+        voice_cached = patch; have_voice_cache = 1;
     } else {
-        plaits_cached = patch;
-        have_plaits_cache = 1;
+        plaits_cached = patch; have_plaits_cache = 1;
         last_plaits_engine = prior;
     }
     if (next == MUTANT_LOFI_MODEL) {
-        if (have_lofi_cache)
-            patch = lofi_cached;
-        else
-            lofi_clean_start(&patch);
+        if (have_lofi_cache) patch = lofi_cached;
+        else lofi_clean_start(&patch);
+    } else if (next == MUTANT_VOICE_MODEL) {
+        if (have_voice_cache) patch = voice_cached;
+        else voice_clean_start(&patch);
     } else if (have_plaits_cache) {
         patch = plaits_cached;
     }
@@ -318,6 +335,7 @@ static void preset_select(uint32_t i)
     /* Recalling a preset resets the temporary per-engine edit histories. */
     have_plaits_cache = 0;
     have_lofi_cache = 0;
+    have_voice_cache = 0;
     if (patch.engine < MUTANT_LOFI_MODEL)
         last_plaits_engine = patch.engine;
     dirty = D_ALL;
@@ -515,7 +533,7 @@ static void draw_main_header(void)
     cv_rect(8, 2, 14, 14, BANK_COLOR[bk]);
     cv_text(11, 0, &FONT_S, BANK_LETTER[bk], C_BLACK);
     fmt_int(b, e % 8 + 1);
-    str_cpy(b + str_len(b), e == MUTANT_LOFI_MODEL ? " / 1" : " / 8", sizeof b - str_len(b));
+    str_cpy(b + str_len(b), e >= MUTANT_LOFI_MODEL ? " / 2" : " / 8", sizeof b - str_len(b));
     cv_text(28, 0, &FONT_S, b, C_GRAY);
     for (i = 0; i < MUTANT_ENGINES; i++) {
         const int32_t x = 160 + (i % 8) * 9, y = 2 + (i / 8) * 5;
@@ -542,7 +560,9 @@ static void draw_main_row(uint32_t row)
 {
     static const char *const LABEL[4] = {"HARM", "TIMBRE", "MORPH", "FREQ"};
     static const char *const CHIP_LABEL[4] = {"CHIP", "WAVE", "DUTY", "FREQ"};
-    const char *const *names = patch.engine == MUTANT_LOFI_MODEL ? CHIP_LABEL : LABEL;
+    static const char *const VOICE_LABEL[4] = {"VOWEL", "VOWL2", "TALK", "FREQ"};
+    const char *const *names = patch.engine == MUTANT_LOFI_MODEL ? CHIP_LABEL :
+                               patch.engine == MUTANT_VOICE_MODEL ? VOICE_LABEL : LABEL;
     char b[16], n[8];
     const uint32_t y = 48u + row * 30u;
     if (row == 3) {
@@ -555,9 +575,11 @@ static void draw_main_row(uint32_t row)
     }
     if (patch.engine == MUTANT_LOFI_MODEL)
         fmt_int(b, row < 2u ? *knob_field(row) * 4 / 1000 : *knob_field(row) * 127 / 1000);
+    else if (patch.engine == MUTANT_VOICE_MODEL)
+        fmt_int(b, *knob_field(row) * 127 / 1000);
     else
         fmt_int(b, *knob_field(row) / 10);
-    draw_row(y, KNOB_COLOR[row], names[row], patch.engine == MUTANT_LOFI_MODEL ? 0 :
+    draw_row(y, KNOB_COLOR[row], names[row], patch.engine >= MUTANT_LOFI_MODEL ? 0 :
              MODEL_PARAM[patch.engine][row], b, *knob_field(row), 0, 1000, main_mod(row));
 }
 
@@ -647,6 +669,18 @@ static void draw_generic_row(uint32_t row)
         return;
     }
     format_param(b, sizeof b, p);
+    if (patch.engine == MUTANT_VOICE_MODEL && page == PAGE_ATTN && row < 3u) {
+        static const char *const N[] = {"SHIFT", "BUZZ", "BREATH"};
+        fmt_int(b, row == 0u ? *p->value * 12 / 100 : (*p->value + 100) * 127 / 200);
+        draw_row(y, KNOB_COLOR[row], N[row], 0, b, *p->value, p->lo, p->hi, *p->value);
+        return;
+    }
+    if (patch.engine == MUTANT_VOICE_MODEL && page == PAGE_LPG && row < 2u) {
+        fmt_int(b, *p->value * 127 / 1000);
+        draw_row(y, KNOB_COLOR[row], row ? "RAND" : "Q", 0, b,
+                 *p->value, p->lo, p->hi, *p->value);
+        return;
+    }
     if (patch.engine == MUTANT_LOFI_MODEL && page == PAGE_ATTN && row < 3u) {
         static const char *const N[] = {"CRSH", "SWP", "VIB"};
         fmt_int(b, (*p->value + 100) * 127 / 200);
@@ -781,6 +815,8 @@ static void note_on(uint32_t note, uint32_t vel)
 {
     if (patch.engine == MUTANT_LOFI_MODEL)
         lo_note_on((uint8_t)note, (uint8_t)vel, &patch);
+    else if (patch.engine == MUTANT_VOICE_MODEL)
+        vo_note_on((uint8_t)note, (uint8_t)vel, &patch);
     else
         macro_note_on((uint8_t)note, (uint8_t)vel);
 }
@@ -791,6 +827,8 @@ static void note_off(uint32_t note)
         return;
     if (patch.engine == MUTANT_LOFI_MODEL)
         lo_note_off((uint8_t)note);
+    else if (patch.engine == MUTANT_VOICE_MODEL)
+        vo_note_off((uint8_t)note);
     else
         macro_note_off((uint8_t)note);
 }
@@ -807,11 +845,12 @@ static void handle_buttons(const fw_input_t *in)
         if (in->pressed & FW_BIT(MAP[i][0]))
             set_page(MAP[i][1]);
     }
-    /* Single-button browser-friendly shortcut: tapping HOME while already
-     * on HOME toggles LOFI / last Plaits model. HOME + note still selects a model. */
+    /* HOME cycles Plaits -> LOFI -> VOICE -> last Plaits model.
+     * One-button access for web emulator; HOME + key still selects exactly. */
     if (was == PAGE_MAIN && (in->pressed & FW_BIT(FW_BTN_HOME)) &&
         !in->keys && !in->keys_pressed) {
-        switch_engine(patch.engine == MUTANT_LOFI_MODEL ? last_plaits_engine : MUTANT_LOFI_MODEL);
+        switch_engine(patch.engine == MUTANT_LOFI_MODEL ? MUTANT_VOICE_MODEL :
+                      patch.engine == MUTANT_VOICE_MODEL ? last_plaits_engine : MUTANT_LOFI_MODEL);
     }
     if ((in->pressed & FW_BIT(FW_BTN_SAVE)) && was == PAGE_SAVE) {
         bank_save(save_slot, in->ms);
@@ -830,6 +869,7 @@ static void handle_buttons(const fw_input_t *in)
         if (!hold) {
             macro_all_notes_off();
             lo_all_off();
+            vo_all_off();
         }
         dirty |= FW_BIT(D_STATUS);
     }
@@ -872,7 +912,8 @@ static void handle_midi_cc(uint32_t cc, uint32_t v)
         switch_engine((int16_t)(v * MUTANT_ENGINES / 128u));
     if (cc >= 16u && cc <= 19u)
         dirty |= FW_BIT(D_HEADER) | 0x1Eu;
-    if (patch.engine == MUTANT_LOFI_MODEL && cc >= 20u && cc <= 24u) {
+    if ((patch.engine == MUTANT_LOFI_MODEL || patch.engine == MUTANT_VOICE_MODEL) &&
+        cc >= 20u && cc <= 24u) {
         int16_t *field = cc == 20u ? &patch.fm_amt : cc == 21u ? &patch.timbre_amt :
                          cc == 22u ? &patch.morph_amt : cc == 23u ? &patch.decay : &patch.colour;
         *field = (int16_t)(cc <= 22u ? (int32_t)v * 200 / 127 - 100 : (int32_t)v * 1000 / 127);
@@ -881,6 +922,7 @@ static void handle_midi_cc(uint32_t cc, uint32_t v)
     if (cc == 120u || cc == 123u) {
         macro_all_notes_off();
         lo_all_off();
+        vo_all_off();
     }
 }
 
@@ -1014,6 +1056,7 @@ static void app_init(void)
         last_plaits_engine = patch.engine;
     macro_init();
     lo_all_off();
+    vo_all_off();
 }
 
 static void app_frame(const fw_input_t *in)
@@ -1027,16 +1070,17 @@ static void app_frame(const fw_input_t *in)
         /* Switching synth families silences the old engine before further MIDI events. */
         macro_all_notes_off();
         lo_all_off();
+        vo_all_off();
         dirty = D_ALL;
     }
     handle_keys(in);
     handle_midi();
     macro_monitor(&mon);
-    if (patch.engine == MUTANT_LOFI_MODEL) {
+    if (patch.engine == MUTANT_LOFI_MODEL || patch.engine == MUTANT_VOICE_MODEL) {
         memset(&mon, 0, sizeof mon);
-        mon.engine = MUTANT_LOFI_MODEL;
-        mon.note10 = (int16_t)lo_current_note10();
-        mon.gate = (uint8_t)lo_current_gate();
+        mon.engine = patch.engine;
+        mon.note10 = (int16_t)(patch.engine == MUTANT_LOFI_MODEL ? lo_current_note10() : vo_current_note10());
+        mon.gate = (uint8_t)(patch.engine == MUTANT_LOFI_MODEL ? lo_current_gate() : vo_current_gate());
     }
     if ((uint32_t)patch.engine != prev_engine)
         dirty |= FW_BIT(D_STATUS);
@@ -1063,6 +1107,8 @@ static void app_audio(int32_t *lr, uint32_t frames)
     }
     if (patch.engine == MUTANT_LOFI_MODEL)
         lo_render(&patch, &global, bend, lr, frames);
+    else if (patch.engine == MUTANT_VOICE_MODEL)
+        vo_render(&patch, &global, bend, lr, frames);
     else
         macro_render(&patch, &global, lr, frames);
     if (scope_ready)
