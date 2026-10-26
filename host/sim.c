@@ -197,6 +197,7 @@ static int host_command(char *line)
         host_bench((uint32_t)atoi(a));
     if (str_eq(cmd, "echo"))
         printf("%s %s %s\n", a, b, c);
+#ifdef MUTANT_V09_APP
     if (str_eq(cmd, "state")) {
         uint32_t i;
         uint32_t hash = 2166136261u, bank_hash = 2166136261u;
@@ -210,6 +211,7 @@ static int host_command(char *line)
                patch.engine, page, hash, bank_hash, mut_depth, mut_speed,
                mut_instability, mut_style, fm1_ms);
     }
+#endif /* MUTANT_V09_APP */
     if (str_eq(cmd, "logo"))
         draw_logo();
     if (str_eq(cmd, "leds"))
