@@ -207,10 +207,10 @@ static int host_command(char *line)
             capture_hash = (capture_hash ^ (uint16_t)*mut_field(&mut_capture, i)) * 16777619u;
         }
         printf("STATE machine=%s run=%u capture=%u engine=%d page=%u hash=%08x bank=%08x caphash=%08x "
-               "depth=%d speed=%d instability=%d style=%d ms=%u\n",
+               "depth=%d speed=%d instability=%d style=%d midich=%d glow=%d ms=%u\n",
                mut_machine ? "MUTANT" : "STUDIO", mut_running, mut_have_capture,
                patch.engine, page, hash, bank_hash, capture_hash, mut_depth, mut_speed,
-               mut_instability, mut_style, fm1_ms);
+               mut_instability, mut_style, global.channel, button_glow, fm1_ms);
     }
 #endif /* MUTANT_V09_APP */
     if (str_eq(cmd, "logo"))
