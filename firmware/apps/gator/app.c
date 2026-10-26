@@ -51,6 +51,8 @@ typedef struct {
     char names[PRESETS][PATCH_NAME];
     uint32_t used;               /* 1 = named sound, 0 = free slot */
 } bank_t;
+_Static_assert(sizeof(bank_t) <= FW_STORE_MAX,
+               "v0.10 library would exceed atomic flash payload capacity");
 
 static const char *const MODEL_NAME[MUTANT_ENGINES] = {
     "VA VCF", "PHASE DIST", "6-OP FM I", "6-OP FM II", "6-OP FM III", "WAVE TERRAIN", "STRING MACH", "CHIPTUNE",
@@ -599,6 +601,10 @@ static void bank_delete(uint32_t slot, uint32_t now)
     if (slot >= PRESETS || !(bank.used & (1u << slot))) {
         message("EMPTY SLOT", now);
         return;
+    }
+    if ((bank.used & (bank.used - 1u)) == 0u) {
+        message("KEEP ONE PATCH", now);
+        return; /* startup always needs one valid playable preset */
     }
     bank.used &= ~(1u << slot);
     if (bank.current == slot) {
