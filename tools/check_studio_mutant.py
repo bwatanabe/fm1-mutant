@@ -17,7 +17,7 @@ for line in path.read_text().splitlines():
         "STUDIO_BASE", "RANDOM1", "RANDOM2", "STUDIO_STEP", "MUTANT_IDLE",
         "MUTANT_CONTROLS", "MUTANT_ADJUSTED", "MUTANT_RUNNING", "MUTANT_EVOLVED", "MUTANT_CAPTURE",
         "MUTANT_LATER", "MUTANT_RESTORED", "RESTORE_RELEASED",
-        "GLO_LONG", "GLO_LONG_RELEASE", "DEVICE_PAGE", "DEVICE_CHANGED", "DEVICE_SAVED",
+        "GLO_LONG", "GLO_LONG_RELEASE", "DEVICE_PAGE", "DEVICE_CHANGED", "DEVICE_SAVED", "DEVICE_RELOADED",
         "CAP_CLEARED_HELD", "CAP_CLEARED_RELEASED", "STUDIO_AGAIN"
     }:
         label = line.split()[0]
@@ -60,6 +60,7 @@ assert entry("DEVICE_PAGE")["page"] == "9", "second GLO hold didn't open DEVICE"
 assert entry("DEVICE_CHANGED")["glow"] == "3", "BUTTON LIGHT level did not change"
 assert entry("DEVICE_CHANGED")["midich"] == "15", "MIDI channel control did not change"
 assert entry("DEVICE_SAVED")["page"] == "9", "SAVE from device page should not open preset SAVE"
+assert entry("DEVICE_RELOADED")["midich"] == "15" and entry("DEVICE_RELOADED")["glow"] == "3", "device config did not survive host simulated reload"
 assert entry("STUDIO_AGAIN")["machine"] == "STUDIO"
 print("STUDIO/MUTANT control regression PASS:")
 print("- two unrestricted randomizations and one bounded mutation produce distinct patches")
