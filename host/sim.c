@@ -198,6 +198,37 @@ static int host_command(char *line)
     if (str_eq(cmd, "echo"))
         printf("%s %s %s\n", a, b, c);
 #ifdef MUTANT_V09_APP
+    if (str_eq(cmd, "legacy_bank")) {
+        /* Simulate real existing v0.9 (16-sound) flash bytes. The exact
+         * prefix length/version matters: a migration regression test. */
+        const uint32_t old_n = sizeof bank.magic + sizeof bank.version +
+             sizeof bank.current + sizeof bank.global +
+             LEGACY_PRESETS * sizeof(macro_patch_t);
+        bank.preset[3].harmonics = 777;
+        bank.magic = BANK_MAGIC;
+        bank.version = 1;
+        memcpy(host_store[0], &bank, old_n);
+        host_store_len[0] = old_n;
+        bank_load();
+        global = bank.global;
+        preset_select(bank.current);
+    }
+    if (str_eq(cmd, "library_reload")) {
+        memset(&bank, 0, sizeof bank);
+        bank_load();
+        global = bank.global;
+        preset_select(bank.current);
+    }
+    if (str_eq(cmd, "library_state")) {
+        printf("LIB used=%08x ver=%u current=%u slot=%u page=%u "
+               "name=%s patch3=%d bytes=%u legacy=%u\n",
+               bank.used, bank.version, bank.current, save_slot, page,
+               bank.names[save_slot], bank.preset[3].harmonics,
+               host_store_len[0],
+               (unsigned)(sizeof bank.magic + sizeof bank.version +
+               sizeof bank.current + sizeof bank.global +
+               LEGACY_PRESETS * sizeof(macro_patch_t)));
+    }
     /* Simulate the device-config load stage of a power-cycle; test that
      * setting flash object 1 was written and can be recovered independently
      * of the existing preset bank object 0. */
@@ -208,17 +239,21 @@ static int host_command(char *line)
     }
     if (str_eq(cmd, "state")) {
         uint32_t i;
-        uint32_t hash = 2166136261u, bank_hash = 2166136261u, capture_hash = 2166136261u;
+        uint32_t hash = 2166136261u, bank_hash = 2166136261u,
+                 capture_hash = 2166136261u, goal_hash = 2166136261u;
         for (i = 0; i < MUT_FIELDS; ++i) {
             hash = (hash ^ (uint16_t)*mut_field(&patch, i)) * 16777619u;
             bank_hash = (bank_hash ^ (uint16_t)*mut_field(&bank.preset[bank.current], i)) * 16777619u;
             capture_hash = (capture_hash ^ (uint16_t)*mut_field(&mut_capture, i)) * 16777619u;
+            goal_hash = (goal_hash ^ (uint16_t)*mut_field(&mut_goal, i)) * 16777619u;
         }
         printf("STATE machine=%s run=%u capture=%u engine=%d page=%u hash=%08x bank=%08x caphash=%08x "
-               "depth=%d speed=%d instability=%d style=%d midich=%d glow=%d ms=%u\n",
+               "depth=%d speed=%d instability=%d style=%d midich=%d glow=%d "
+               "clock=%d bpm=%d div=%d ticks=%u goal=%08x ms=%u\n",
                mut_machine ? "MUTANT" : "STUDIO", mut_running, mut_have_capture,
                patch.engine, page, hash, bank_hash, capture_hash, mut_depth, mut_speed,
-               mut_instability, mut_style, global.channel, button_glow, fm1_ms);
+               mut_instability, mut_style, global.channel, button_glow,
+               mut_clock_mode, mut_bpm, mut_div, mut_midi_tick, goal_hash, fm1_ms);
     }
 #endif /* MUTANT_V09_APP */
     if (str_eq(cmd, "logo"))

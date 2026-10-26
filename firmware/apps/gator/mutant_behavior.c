@@ -14,6 +14,7 @@ static macro_patch_t mut_anchor, mut_goal, mut_capture;
 static uint32_t mut_start_ms, mut_next_ms, mut_last_ms;
 static int16_t mut_depth = 45, mut_speed = 35, mut_instability = 25, mut_style = MUT_DRIFT;
 
+
 static uint32_t mut_random(void)
 {
     /* Independent xorshift state. Never mutate audio-engine PRNG state. */
@@ -66,6 +67,53 @@ static void mut_normalize(macro_patch_t *p)
     for (i = 0; i < MUT_FIELDS; ++i)
         *mut_field(p, i) = (int16_t)mut_clamp(*mut_field(p, i), mut_min(i), mut_max(i));
 }
+
+/* v0.10 clock: FREE is v0.9 behavior, INT is a local BPM, MIDI is
+ * 24 PPQN timing from OP-XY or any MIDI clock sender. These tick only
+ * the *selection of new morph targets*. Interpolation remains fluid. */
+enum { MUT_CLK_FREE, MUT_CLK_INT, MUT_CLK_MIDI, MUT_CLK_COUNT };
+static const char *const MUT_CLK_NAME[] = {"FREE", "INTERNAL", "MIDI"};
+static const char *const MUT_DIV_NAME[] = {"1/4 BEAT", "1 BEAT", "2 BEATS", "1 BAR", "2 BARS"};
+static const uint16_t MUT_DIV_TICKS[] = {6, 24, 48, 96, 192};
+static int16_t mut_clock_mode = MUT_CLK_FREE, mut_bpm = 120, mut_div = 3;
+static uint32_t mut_midi_tick, mut_midi_last_ms, mut_clock_last_tick;
+static uint8_t mut_midi_seen, mut_midi_transport = 1;
+
+static void mut_clock_receive(uint8_t status, uint32_t now)
+{
+    if (status == 0xFAu) { /* MIDI START, beat-grid reset */
+        mut_midi_tick = 0;
+        mut_clock_last_tick = 0;
+        mut_midi_transport = 1;
+    } else if (status == 0xFBu) {
+        mut_midi_transport = 1; /* CONTINUE */
+    } else if (status == 0xFCu) {
+        mut_midi_transport = 0; /* STOP; retain the last mutation target */
+    } else if (status == 0xF8u && mut_midi_transport) {
+        ++mut_midi_tick;
+        mut_midi_last_ms = now;
+        mut_midi_seen = 1;
+    }
+}
+static uint32_t mut_internal_interval(void)
+{
+    const uint32_t ticks = MUT_DIV_TICKS[mut_clamp(mut_div, 0, 4)];
+    return (uint32_t)((60000ull * ticks) / (24u * (uint32_t)mut_clamp(mut_bpm, 40, 240)));
+}
+static void mut_reanchor(uint32_t now)
+{
+    if (!mut_running) return;
+    mut_anchor = patch;
+    mut_goal = patch;
+    mut_normalize(&mut_anchor);
+    mut_start_ms = now;
+    mut_last_ms = now;
+    mut_next_ms = now + (mut_clock_mode == MUT_CLK_INT ? mut_internal_interval() : 0);
+    mut_clock_last_tick = mut_midi_tick;
+    dirty = D_ALL;
+}
+
+
 
 /* PLAY in STUDIO: one smaller, bounded relative mutation. ARP in STUDIO:
  * genuinely FULL-RANGE source parameter randomization with each click. */
@@ -128,7 +176,8 @@ static void mut_toggle_run(uint32_t ms)
     mut_goal = patch;
     mut_normalize(&mut_anchor);
     mut_start_ms = ms;
-    mut_next_ms = ms;
+    mut_next_ms = ms + (mut_clock_mode == MUT_CLK_INT ? mut_internal_interval() : 0);
+    mut_clock_last_tick = mut_midi_tick;
     mut_last_ms = ms;
     mut_running = 1;
     message("EVOLVING", ms);
@@ -176,7 +225,24 @@ static void mut_motion_tick(uint32_t now)
     mut_last_ms = now;
     /* Longer between new targets at low SPEED; more fluid at high SPEED. */
     interval = 100u + (uint32_t)(100 - mut_speed) * 11u;
-    if ((int32_t)(now - mut_next_ms) >= 0) {
+    {
+        int target_due = 0;
+        if (mut_clock_mode == MUT_CLK_FREE) {
+            target_due = (int32_t)(now - mut_next_ms) >= 0;
+        } else if (mut_clock_mode == MUT_CLK_INT) {
+            interval = mut_internal_interval();
+            target_due = (int32_t)(now - mut_next_ms) >= 0;
+        } else if (mut_midi_seen && mut_midi_transport &&
+                   now - mut_midi_last_ms < 1500u) {
+            /* Never guess beats when OP-XY clock isn't arriving.
+             * Keep gliding but hold off on NEW targets until sync resumes. */
+            const uint32_t ticks = MUT_DIV_TICKS[mut_clamp(mut_div, 0, 4)];
+            if ((uint32_t)(mut_midi_tick - mut_clock_last_tick) >= ticks) {
+                mut_clock_last_tick += ticks;
+                target_due = 1;
+            }
+        }
+        if (target_due) {
         uint32_t picks = 1u + (mut_instability >= 75 ? 1u : 0u);
         while (picks--) {
             const uint32_t field_idx = mut_range(MUT_FIELDS);
@@ -204,6 +270,7 @@ static void mut_motion_tick(uint32_t now)
             }
         }
         mut_next_ms = now + interval;
+        }
     }
     updated = patch;
     for (i = 0; i < MUT_FIELDS; ++i) {
