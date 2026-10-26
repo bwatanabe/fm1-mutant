@@ -1014,7 +1014,7 @@ static void handle_buttons(const fw_input_t *in)
 {
     static const uint8_t MAP[][2] = {
         {FW_BTN_HOME, PAGE_MAIN}, {FW_BTN_SCL, PAGE_ATTN}, {FW_BTN_FX, PAGE_LPG}, {FW_BTN_ENV, PAGE_ENV},
-        {FW_BTN_LFO, PAGE_LFO}, {FW_BTN_EDIT, PAGE_MATRIX}, {FW_BTN_GLO, PAGE_GLOBAL}
+        {FW_BTN_LFO, PAGE_LFO}, {FW_BTN_EDIT, PAGE_MATRIX}, {FW_BTN_SEQ, PAGE_MUTANT}
     };
     const uint32_t was = page;
     uint32_t i;
@@ -1022,6 +1022,36 @@ static void handle_buttons(const fw_input_t *in)
         if (in->pressed & FW_BIT(MAP[i][0]))
             set_page(MAP[i][1]);
     }
+    /* GLO short click toggles machine only on release. A long hold opens
+     * the unmodified GLOBAL controls, and does not toggle the machine. */
+    if (in->pressed & FW_BIT(FW_BTN_GLO)) {
+        glo_press_ms = in->ms;
+        glo_long = 0;
+    }
+    if ((in->held & FW_BIT(FW_BTN_GLO)) && !glo_long &&
+        (uint32_t)(in->ms - glo_press_ms) >= 650u) {
+        glo_long = 1;
+        set_page(PAGE_GLOBAL);
+    }
+    if (in->released & FW_BIT(FW_BTN_GLO)) {
+        if (!glo_long) {
+            mut_toggle_machine(in->ms);
+            set_page(PAGE_MAIN);
+        }
+    }
+    /* REC tap captures a temporary RAM checkpoint; holding restores it.
+     * No audio recording, no flash writes, no alteration of saved presets. */
+    if (in->pressed & FW_BIT(FW_BTN_REC)) {
+        rec_press_ms = in->ms;
+        rec_long = 0;
+    }
+    if ((in->held & FW_BIT(FW_BTN_REC)) && !rec_long &&
+        (uint32_t)(in->ms - rec_press_ms) >= 650u) {
+        rec_long = 1;
+        mut_restore(in->ms);
+    }
+    if ((in->released & FW_BIT(FW_BTN_REC)) && !rec_long)
+        mut_checkpoint(in->ms);
     /* HOME cycles Plaits -> LOFI -> VOICE -> CHIP VOX -> ANIMAL -> ANIMAL VOX -> Plaits.
      * One-button access for web emulator; HOME + key still selects exactly. */
     if (was == PAGE_MAIN && (in->pressed & FW_BIT(FW_BTN_HOME)) &&
@@ -1040,21 +1070,20 @@ static void handle_buttons(const fw_input_t *in)
         save_slot = bank.current;
         set_page(PAGE_SAVE);
     }
+    /* PLAY performs one bounded mutation in STUDIO; starts/stops autonomous
+     * behavior in MUTANT. ARP is full-range RANDOM in STUDIO and a one-step
+     * perturbation in MUTANT. Both actions preserve engine and EDIT routes. */
     if (in->pressed & FW_BIT(FW_BTN_PLAY)) {
-        patch.mode = MODE_NEXT[patch.mode];
-        dirty |= FW_BIT(D_STATUS);
+        if (mut_machine)
+            mut_toggle_run(in->ms);
+        else
+            mut_step(in->ms);
     }
-    if (in->pressed & FW_BIT(FW_BTN_REC)) {
-        hold = !hold;
-        if (!hold) {
-            macro_all_notes_off();
-            lo_all_off();
-            vo_all_off();
-            hy_all_off();
-            an_all_off();
-            av_all_off();
-        }
-        dirty |= FW_BIT(D_STATUS);
+    if (in->pressed & FW_BIT(FW_BTN_ARP)) {
+        if (mut_machine)
+            mut_step(in->ms);
+        else
+            mut_randomize_full(in->ms);
     }
     if (in->pressed & FW_BIT(FW_BTN_OCT_DOWN))
         octave = clampi(octave - 1, -3, 3);
@@ -1240,12 +1269,13 @@ static void handle_knobs(const fw_input_t *in)
 static void update_leds(const fw_input_t *in)
 {
     static const uint8_t PAGE_LED[PAGES] = {FW_BTN_HOME, FW_BTN_SCL, FW_BTN_FX, FW_BTN_ENV, FW_BTN_LFO, FW_BTN_EDIT,
-                                            FW_BTN_GLO, FW_BTN_SAVE};
+                                            FW_BTN_GLO, FW_BTN_SAVE, FW_BTN_SEQ};
     uint32_t i;
     for (i = 0; i < PAGES; i++)
         fw_led_button(PAGE_LED[i], i == page);
-    fw_led_button(FW_BTN_PLAY, patch.mode != MODE_TRIG);
-    fw_led_button(FW_BTN_REC, hold);
+    fw_led_button(FW_BTN_GLO, mut_machine || page == PAGE_GLOBAL);
+    fw_led_button(FW_BTN_PLAY, mut_running);
+    fw_led_button(FW_BTN_REC, mut_have_capture);
     if (in->held & FW_BIT(FW_BTN_HOME)) {
         fw_leds_keys(FW_BIT(patch.engine));
         return;
@@ -1287,6 +1317,7 @@ static void app_frame(const fw_input_t *in)
     }
     handle_keys(in);
     handle_midi();
+    mut_motion_tick(in->ms);
     macro_monitor(&mon);
     if (patch.engine >= MUTANT_LOFI_MODEL) {
         memset(&mon, 0, sizeof mon);
