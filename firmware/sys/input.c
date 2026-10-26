@@ -53,6 +53,34 @@ static void fw_input_read(fw_input_t *in)
 }
 
 static void fw_led_button(uint32_t label, int on) { fm1_led_key(fw_matrix_of(label), on); }
+/* Mutant-only optional button label illumination; the FM-1 HAL provides
+ * three physical layers (full bright, dim glow and timed background pulse).
+ * Apply only to 14 control buttons, NEVER the 27 note key LEDs.
+ * Called from the UI; recomputes the mask only when the selected level
+ * changes, so it has no per-audio-block overhead.
+ * 0 = OFF, 1 = low, 2 = medium, 3 = brighter inactive label.
+ * Full-bright LED state always wins over the background layer. */
+static void fw_led_button_background(uint32_t level)
+{
+    static uint32_t last_level = 0xFFFFFFFFu;
+    static const uint16_t PULSE_NS[4] = {0, 4500, 10500, 22000};
+    uint32_t label, col, row;
+    if (level > 3u) level = 3u;
+    if (last_level == level) return;
+    last_level = level;
+    for (col = 0; col < FM1_NCOL; ++col)
+        fm1_led_bg[col] = 0;
+    fm1_led_bg_ns = PULSE_NS[level];
+    if (!level) return;
+    for (label = 0; label < FW_BTN_COUNT; ++label) {
+        const int id = (int)fw_matrix_of(label);
+        for (col = 0; col < FM1_NCOL; ++col)
+            for (row = 1; row < 5u; ++row)
+                if (FM1_KEYMAP[row][col] == id)
+                    fm1_led_bg[col] |= (uint8_t)(1u << row);
+    }
+}
+
 static void fw_led_note_key(uint32_t key, int on) { fm1_led_key(14u + key, on); }
 
 static void fw_leds_keys(uint32_t mask)
