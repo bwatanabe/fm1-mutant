@@ -100,6 +100,9 @@ jobs:
           python3 tools/sim.py host/studio-mutant.sim > build/host/out/studio-mutant.log
           python3 tools/sim.py host/midi-performance.sim > build/host/out/midi-performance.log
           python3 tools/check_studio_mutant.py build/host/out/studio-mutant.log build/host/out/midi-performance.log
+          python3 tools/sim.py host/patch-library.sim > build/host/out/patch-library.log
+          python3 tools/sim.py host/mutation-clock.sim > build/host/out/mutation-clock.log
+          python3 tools/check_library_clock.py
           python3 tools/sim.py --app demo
           python3 tools/sim.py --app mutant
           python3 tools/sim.py --test
@@ -145,10 +148,25 @@ jobs:
           path: build/mutant-site/
           if-no-files-found: error
 
+      - name: Compile combined v0.10 web firmware
+        if: github.ref == 'refs/heads/feature/patch-library-clock-v010'
+        run: |
+          set -euo pipefail
+          ./build.sh --app gator --name mutant
+          node web/test_web.mjs build/mutant.fwsc
+          python3 web/make_mutant_site.py --version "v0.10-dev-${GITHUB_SHA:0:7}"
+          (cd build/mutant-site/firmware && sha256sum -c SHA256SUMS)
       - name: Upload v0.10 experimental firmware
         if: github.ref == 'refs/heads/feature/patch-library-clock-v010'
         uses: actions/upload-artifact@v4
         with:
           name: mutant-v010-firmware-test
           path: build/mutant.fwsc
+          if-no-files-found: error
+      - name: Upload v0.10 preview site
+        if: github.ref == 'refs/heads/feature/patch-library-clock-v010'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutant-v010-preview-site
+          path: build/mutant-site/
           if-no-files-found: error
