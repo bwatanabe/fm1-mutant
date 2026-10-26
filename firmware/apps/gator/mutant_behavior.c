@@ -140,6 +140,15 @@ static void mut_checkpoint(uint32_t ms)
     mut_have_capture = 1;
     message("CAPTURED", ms);
 }
+/* Checkpoints are shared between STUDIO and MUTANT. Long REC clears it,
+ * and its LED goes dark; clearing never touches flash or audio sources. */
+static void mut_clear_capture(uint32_t ms)
+{
+    mut_have_capture = 0;
+    message("CAP CLEARED", ms);
+    dirty |= FW_BIT(D_STATUS);
+}
+
 static void mut_restore(uint32_t ms)
 {
     if (!mut_have_capture) {

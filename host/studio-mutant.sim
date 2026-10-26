@@ -71,11 +71,20 @@ state
 # REC long = restore the captured sound and stop evolution
 btn REC down
 frames 48
+btn REC up
+frames 2
 echo MUTANT_RESTORED
+state
+echo RESTORE_RELEASED
+state
+# More than two seconds clears the temporary capture and its REC LED.
+btn REC down
+frames 140
+echo CAP_CLEARED_HELD
 state
 btn REC up
 frames 2
-echo RESTORE_RELEASED
+echo CAP_CLEARED_RELEASED
 state
 # GLO long = GLOBAL page (index 6), NOT toggle machine
 btn GLO down
@@ -85,6 +94,28 @@ state
 btn GLO up
 frames 2
 echo GLO_LONG_RELEASE
+state
+# Another held GLO from GLOBAL opens DEVICE page. Set a brighter
+# button backlight and MIDI channel 15 without modifying preset bank.
+btn GLO down
+frames 48
+btn GLO up
+frames 2
+echo DEVICE_PAGE
+state
+knob K1 1
+knob K2 15
+frames 3
+echo DEVICE_CHANGED
+state
+btn SAVE down
+frames 2
+btn SAVE up
+frames 2
+echo DEVICE_SAVED
+state
+device_reload
+echo DEVICE_RELOADED
 state
 # HOME returns us; GLO tap returns to Studio
 btn HOME down

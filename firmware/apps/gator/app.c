@@ -23,7 +23,7 @@
 #define DRAWS_PER_FRAME 2u
 #define CPU_GUARD_Q8 218u
 
-enum { PAGE_MAIN, PAGE_ATTN, PAGE_LPG, PAGE_ENV, PAGE_LFO, PAGE_MATRIX, PAGE_GLOBAL, PAGE_SAVE, PAGE_MUTANT, PAGES };
+enum { PAGE_MAIN, PAGE_ATTN, PAGE_LPG, PAGE_ENV, PAGE_LFO, PAGE_MATRIX, PAGE_GLOBAL, PAGE_SAVE, PAGE_MUTANT, PAGE_DEVICE, PAGES };
 enum { FMT_100, FMT_BIP, FMT_INT, FMT_SEMI, FMT_ENUM, FMT_ONOFF, FMT_CHANNEL, FMT_TIME };
 enum { D_HEADER = 0, D_ROW0 = 1, D_ENC = 12, D_SCOPE = 13, D_STATUS = 14, D_ALL = 0x7FFFu };
 
@@ -81,6 +81,20 @@ static macro_patch_t patch;
 static macro_global_t global;
 static macro_monitor_t mon;
 static bank_t bank;
+/* Slot 0 is the unchanged legacy sixteen-preset bank. The previously
+ * unused second A/B storage object holds small device-only settings,
+ * tagged with a version and magic to reject unrelated old content.
+ * Only an explicit SAVE while on GLOBAL writes this new object. */
+#define MUT_DEVICE_MAGIC 0x3144564Du /* MVD1 */
+typedef struct {
+    uint32_t magic;
+    uint16_t version;
+    int16_t midi_channel;    /* OMNI=0; otherwise 1..16 */
+    int16_t button_glow;     /* 0 off, 1 dim, 2 med, 3 brighter */
+    uint16_t reserved;
+} mutant_device_config_t;
+static int16_t button_glow = 2;
+static uint8_t device_settings_dirty;
 static uint32_t page = PAGE_MAIN, route_sel, save_slot, dirty = D_ALL, frame_count;
 static int32_t octave;
 static uint32_t hold, key_held;
@@ -108,6 +122,10 @@ static void message(const char *s, uint32_t now);
 #include "mutant_behavior.c"
 static uint32_t glo_press_ms, rec_press_ms;
 static uint8_t glo_long, rec_long;
+/* Rising-edge triggers avoid repeat RANDOM / CAPTURE commands when the
+ * OP-XY re-sends a held CC value during playback. */
+static uint8_t midi_trigger_high[5];
+
 
 /* New engine imports should preserve the old preset format.
  * On FIRST switching from Plaits to LOFI, load Felucca's own clean
@@ -266,6 +284,11 @@ static const page_t PAGE_DEF[PAGES] = {
         {"INSTAB", &mut_instability, 0, 100, 2, FMT_INT, 0},
         {"STYLE", &mut_style, 0, MUT_STYLES - 1, 1, FMT_ENUM, MUT_STYLE_NAME}},
         {{0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0}}},
+    [PAGE_DEVICE] = {"DEVICE", {
+        {"BUTTON LIGHT", &button_glow, 0, 3, 1, FMT_INT, 0},
+        {"MIDI CH", &global.channel, 0, 16, 1, FMT_CHANNEL, 0},
+        {0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0}},
+        {{0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0}}},
     [PAGE_GLOBAL] = {"GLOBAL", {
         {"GLIDE", &patch.glide, 0, 1000, 10, FMT_100, 0},
         {"BEND RANGE", &global.bend_range, 0, 12, 1, FMT_SEMI, 0},
@@ -411,6 +434,33 @@ static void bank_load(void)
     clamp16(&bank.global.fine, -100, 100);
     clamp16(&bank.global.legato, 0, 1);
     clamp16(&bank.global.channel, 0, 16);
+}
+
+static void mutant_device_load(void)
+{
+    mutant_device_config_t c;
+    const int n = fw_store_load(1, &c, sizeof c);
+    if (n == (int)sizeof c && c.magic == MUT_DEVICE_MAGIC &&
+        c.version == 1u && c.midi_channel >= 0 && c.midi_channel <= 16 &&
+        c.button_glow >= 0 && c.button_glow <= 3) {
+        global.channel = c.midi_channel;
+        button_glow = c.button_glow;
+    }
+    device_settings_dirty = 0;
+}
+
+static int mutant_device_save(void)
+{
+    mutant_device_config_t c;
+    memset(&c, 0, sizeof c);
+    c.magic = MUT_DEVICE_MAGIC;
+    c.version = 1;
+    c.midi_channel = global.channel;
+    c.button_glow = button_glow;
+    if (fw_store_save(1, &c, sizeof c) != 0)
+        return -1;
+    device_settings_dirty = 0;
+    return 0;
 }
 
 static void preset_select(uint32_t i)
@@ -905,6 +955,8 @@ static void draw_strip(uint32_t bit)
         draw_title("SAVE", "PRESET");
     if (bit == D_HEADER && page == PAGE_MUTANT)
         draw_title("MUTATION", mut_machine ? "MUTANT" : "STUDIO");
+    if (bit == D_HEADER && page == PAGE_DEVICE)
+        draw_title("DEVICE", "SAVE=CONFIG");
     if (bit == D_HEADER && page != PAGE_MAIN && page != PAGE_MATRIX &&
         page != PAGE_SAVE && page != PAGE_MUTANT)
         draw_title(PAGE_DEF[page].title, 0);
@@ -1032,7 +1084,10 @@ static void handle_buttons(const fw_input_t *in)
     if ((in->held & FW_BIT(FW_BTN_GLO)) && !glo_long &&
         (uint32_t)(in->ms - glo_press_ms) >= 650u) {
         glo_long = 1;
-        set_page(PAGE_GLOBAL);
+        /* A second long GLO press from GLOBAL opens DEVICE;
+         * from DEVICE it returns to GLOBAL. A tap always switches
+         * STUDIO/MUTANT as before. */
+        set_page(page == PAGE_GLOBAL ? PAGE_DEVICE : PAGE_GLOBAL);
     }
     if (in->released & FW_BIT(FW_BTN_GLO)) {
         if (!glo_long) {
@@ -1040,19 +1095,28 @@ static void handle_buttons(const fw_input_t *in)
             set_page(PAGE_MAIN);
         }
     }
-    /* REC tap captures a temporary RAM checkpoint; holding restores it.
-     * No audio recording, no flash writes, no alteration of saved presets. */
+    /* REC: tap captures, hold 0.65..2s restores, hold >2s clears.
+     * Wait for release before restoring to distinguish the two
+     * long-press gestures WITHOUT restoring while clearing.
+     * The snapshot remains shared between the two machine modes. */
     if (in->pressed & FW_BIT(FW_BTN_REC)) {
         rec_press_ms = in->ms;
         rec_long = 0;
     }
     if ((in->held & FW_BIT(FW_BTN_REC)) && !rec_long &&
-        (uint32_t)(in->ms - rec_press_ms) >= 650u) {
+        (uint32_t)(in->ms - rec_press_ms) >= 2000u) {
         rec_long = 1;
-        mut_restore(in->ms);
+        mut_clear_capture(in->ms);
     }
-    if ((in->released & FW_BIT(FW_BTN_REC)) && !rec_long)
-        mut_checkpoint(in->ms);
+    if (in->released & FW_BIT(FW_BTN_REC)) {
+        if (rec_long) {
+            /* Already cleared; never also capture on release. */
+        } else if ((uint32_t)(in->ms - rec_press_ms) >= 650u) {
+            mut_restore(in->ms);
+        } else {
+            mut_checkpoint(in->ms);
+        }
+    }
     /* HOME cycles Plaits -> LOFI -> VOICE -> CHIP VOX -> ANIMAL -> ANIMAL VOX -> Plaits.
      * One-button access for web emulator; HOME + key still selects exactly. */
     if (was == PAGE_MAIN && (in->pressed & FW_BIT(FW_BTN_HOME)) &&
@@ -1063,11 +1127,17 @@ static void handle_buttons(const fw_input_t *in)
                       patch.engine == MUTANT_ANIMAL_MODEL ? MUTANT_ANIMAL_VOX_MODEL :
                       patch.engine == MUTANT_ANIMAL_VOX_MODEL ? last_plaits_engine : MUTANT_LOFI_MODEL);
     }
+    if ((in->pressed & FW_BIT(FW_BTN_SAVE)) &&
+        (was == PAGE_GLOBAL || was == PAGE_DEVICE)) {
+        /* Explicit device-only SAVE, no preset or bank write. */
+        message(mutant_device_save() == 0 ? "CONFIG SAVED" : "CONFIG ERROR", in->ms);
+    }
     if ((in->pressed & FW_BIT(FW_BTN_SAVE)) && was == PAGE_SAVE) {
         bank_save(save_slot, in->ms);
         set_page(PAGE_MAIN);
     }
-    if ((in->pressed & FW_BIT(FW_BTN_SAVE)) && was != PAGE_SAVE) {
+    if ((in->pressed & FW_BIT(FW_BTN_SAVE)) && was != PAGE_SAVE &&
+        was != PAGE_GLOBAL && was != PAGE_DEVICE) {
         save_slot = bank.current;
         set_page(PAGE_SAVE);
     }
@@ -1117,6 +1187,46 @@ static void handle_keys(const fw_input_t *in)
 
 static void handle_midi_cc(uint32_t cc, uint32_t v)
 {
+    /* Dedicated Mutant performance CCs, accepted only on selected MIDI CH.
+     * 40 DEPTH; 41 SPEED; 42 INSTAB; 43 STYLE.
+     * 44 RUN (>=64 on, <64 off); 45 RANDOM/STEP; 46 CAPTURE;
+     * 47 RESTORE; 48 STUDIO/MUTANT; 49 CLEAR CAPTURE.
+     * The action CCs are triggered on low-to-high transitions only. */
+    if (cc >= 40u && cc <= 43u) {
+        int16_t *dest = cc == 40u ? &mut_depth : cc == 41u ? &mut_speed :
+                        cc == 42u ? &mut_instability : &mut_style;
+        *dest = (int16_t)(cc == 43u ? v * MUT_STYLES / 128u : v * 100u / 127u);
+        dirty |= FW_BIT(D_HEADER) | 0x1Eu;
+        return;
+    }
+    if (cc == 44u) {
+        if (mut_machine && (!!mut_running != (v >= 64u)))
+            mut_toggle_run(fm1_ms);
+        return;
+    }
+    if (cc == 48u) {
+        if ((uint32_t)mut_machine != (v >= 64u))
+            mut_toggle_machine(fm1_ms);
+        return;
+    }
+    if (cc == 45u || cc == 46u || cc == 47u || cc == 49u) {
+        const uint32_t slot = cc - 45u;
+        const uint8_t high = v >= 64u;
+        if (high && !midi_trigger_high[slot]) {
+            if (cc == 45u) {
+                if (mut_machine) mut_step(fm1_ms);
+                else mut_randomize_full(fm1_ms);
+            } else if (cc == 46u) {
+                mut_checkpoint(fm1_ms);
+            } else if (cc == 47u) {
+                mut_restore(fm1_ms);
+            } else {
+                mut_clear_capture(fm1_ms);
+            }
+        }
+        midi_trigger_high[slot] = high;
+        return;
+    }
     if (cc == 1u)
         mod_wheel = (uint8_t)v;  /* Manual CHIP VOX vowel morph when SPEED=0 */
     if (cc >= 16u && cc <= 18u)
@@ -1265,18 +1375,21 @@ static void handle_knobs(const fw_input_t *in)
         handle_knobs_save(in);
     if (page != PAGE_MAIN && page != PAGE_MATRIX && page != PAGE_SAVE)
         handle_knobs_generic(in);
+    if (page == PAGE_DEVICE || page == PAGE_GLOBAL)
+        device_settings_dirty = 1;
 }
 
 static void update_leds(const fw_input_t *in)
 {
     static const uint8_t PAGE_LED[PAGES] = {FW_BTN_HOME, FW_BTN_SCL, FW_BTN_FX, FW_BTN_ENV, FW_BTN_LFO, FW_BTN_EDIT,
-                                            FW_BTN_GLO, FW_BTN_SAVE, FW_BTN_SEQ};
+                                            FW_BTN_GLO, FW_BTN_SAVE, FW_BTN_SEQ, FW_BTN_GLO};
     uint32_t i;
     for (i = 0; i < PAGES; i++)
         fw_led_button(PAGE_LED[i], i == page);
     fw_led_button(FW_BTN_GLO, mut_machine || page == PAGE_GLOBAL);
     fw_led_button(FW_BTN_PLAY, mut_running);
     fw_led_button(FW_BTN_REC, mut_have_capture);
+    fw_led_button_background((uint32_t)button_glow);
     if (in->held & FW_BIT(FW_BTN_HOME)) {
         fw_leds_keys(FW_BIT(patch.engine));
         return;
@@ -1288,6 +1401,7 @@ static void app_init(void)
 {
     bank_load();
     global = bank.global;
+    mutant_device_load();  /* optional slot 1 overrides legacy channel */
     preset_select(bank.current);
     if (patch.engine < MUTANT_LOFI_MODEL)
         last_plaits_engine = patch.engine;

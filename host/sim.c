@@ -198,6 +198,14 @@ static int host_command(char *line)
     if (str_eq(cmd, "echo"))
         printf("%s %s %s\n", a, b, c);
 #ifdef MUTANT_V09_APP
+    /* Simulate the device-config load stage of a power-cycle; test that
+     * setting flash object 1 was written and can be recovered independently
+     * of the existing preset bank object 0. */
+    if (str_eq(cmd, "device_reload")) {
+        global.channel = 0;
+        button_glow = 0;
+        mutant_device_load();
+    }
     if (str_eq(cmd, "state")) {
         uint32_t i;
         uint32_t hash = 2166136261u, bank_hash = 2166136261u, capture_hash = 2166136261u;
@@ -207,10 +215,10 @@ static int host_command(char *line)
             capture_hash = (capture_hash ^ (uint16_t)*mut_field(&mut_capture, i)) * 16777619u;
         }
         printf("STATE machine=%s run=%u capture=%u engine=%d page=%u hash=%08x bank=%08x caphash=%08x "
-               "depth=%d speed=%d instability=%d style=%d ms=%u\n",
+               "depth=%d speed=%d instability=%d style=%d midich=%d glow=%d ms=%u\n",
                mut_machine ? "MUTANT" : "STUDIO", mut_running, mut_have_capture,
                patch.engine, page, hash, bank_hash, capture_hash, mut_depth, mut_speed,
-               mut_instability, mut_style, fm1_ms);
+               mut_instability, mut_style, global.channel, button_glow, fm1_ms);
     }
 #endif /* MUTANT_V09_APP */
     if (str_eq(cmd, "logo"))

@@ -5,7 +5,7 @@ name: ci
 
 on:
   push:
-    branches: [main, feature/felucca-lofi, feature/plaits-lofi, feature/jiant-formant, feature/lofi-formant, feature/chip-vox-motion, feature/jiant-animal, feature/animal-formant, feature/studio-mutant-v09]
+    branches: [main, feature/felucca-lofi, feature/plaits-lofi, feature/jiant-formant, feature/lofi-formant, feature/chip-vox-motion, feature/jiant-animal, feature/animal-formant, feature/studio-mutant-v09, feature/performance-v091]
   pull_request:
   workflow_dispatch:
 
@@ -98,7 +98,8 @@ jobs:
           python3 tools/sim.py host/animalvox-cmos-dry.sim
           python3 tools/check_animal_vox_wav.py
           python3 tools/sim.py host/studio-mutant.sim > build/host/out/studio-mutant.log
-          python3 tools/check_studio_mutant.py build/host/out/studio-mutant.log
+          python3 tools/sim.py host/midi-performance.sim > build/host/out/midi-performance.log
+          python3 tools/check_studio_mutant.py build/host/out/studio-mutant.log build/host/out/midi-performance.log
           python3 tools/sim.py --app demo
           python3 tools/sim.py --app mutant
           python3 tools/sim.py --test
@@ -113,3 +114,33 @@ jobs:
           (cd build/mutant-site/firmware && sha256sum -c SHA256SUMS)
           python3 web/make_site.py
           (cd build/site/firmware && sha256sum -c SHA256SUMS)
+
+      # New workflow files created only on experimental branches may not be
+      # scheduled until they are present on the default branch. Package the
+      # already-verified experimental image here, after all CI tests, so the
+      # user can download the exact combined firmware without publishing main.
+      - name: Build v0.9.1 combined test firmware
+        if: github.ref == 'refs/heads/feature/performance-v091' || github.head_ref == 'feature/performance-v091'
+        run: |
+          set -euo pipefail
+          ./build.sh --app gator --name mutant
+          node web/test_web.mjs build/mutant.fwsc
+          python3 web/make_mutant_site.py --version "v0.9.1-dev-${GITHUB_SHA:0:7}"
+          (cd build/mutant-site/firmware && sha256sum -c SHA256SUMS)
+      - name: Upload v0.9.1 firmware artifact
+        if: github.ref == 'refs/heads/feature/performance-v091' || github.head_ref == 'feature/performance-v091'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutant-v091-firmware-test
+          path: |
+            build/mutant.fwsc
+            build/host/out/studio-mutant.log
+            build/host/out/midi-performance.log
+          if-no-files-found: error
+      - name: Upload v0.9.1 test preview website
+        if: github.ref == 'refs/heads/feature/performance-v091' || github.head_ref == 'feature/performance-v091'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutant-v091-preview-site
+          path: build/mutant-site/
+          if-no-files-found: error
