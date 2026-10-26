@@ -15,7 +15,7 @@ for line in path.read_text().splitlines():
     # prefix. Test labels are unambiguous, uppercase single-word markers.
     if line.split() and line.split()[0] in {
         "STUDIO_BASE", "RANDOM1", "RANDOM2", "STUDIO_STEP", "MUTANT_IDLE",
-        "MUTANT_CONTROLS", "MUTANT_RUNNING", "MUTANT_EVOLVED", "MUTANT_CAPTURE",
+        "MUTANT_CONTROLS", "MUTANT_ADJUSTED", "MUTANT_RUNNING", "MUTANT_EVOLVED", "MUTANT_CAPTURE",
         "MUTANT_LATER", "MUTANT_RESTORED", "RESTORE_RELEASED",
         "GLO_LONG", "GLO_LONG_RELEASE", "STUDIO_AGAIN"
     }:
@@ -37,6 +37,12 @@ assert all(s["bank"] == initial["bank"] for s in snapshots.values()), "saved pre
 idle, controls = entry("MUTANT_IDLE"), entry("MUTANT_CONTROLS")
 assert idle["machine"] == "MUTANT" and idle["run"] == "0" and idle["page"] == "0"
 assert controls["page"] == "8", "SEQ did not open the mutation controls"
+adjusted = entry("MUTANT_ADJUSTED")
+assert adjusted["page"] == "8", "adjusted page disappeared"
+assert adjusted["depth"] != controls["depth"], "depth knob not responding"
+assert adjusted["speed"] != controls["speed"], "speed knob not responding"
+assert adjusted["instability"] != controls["instability"], "instability knob not responding"
+assert adjusted["style"] != controls["style"], "style knob not responding"
 running, evolved = entry("MUTANT_RUNNING"), entry("MUTANT_EVOLVED")
 assert running["run"] == "1" and evolved["run"] == "1"
 assert evolved["hash"] != running["hash"], "autonomous mutation did not move"
