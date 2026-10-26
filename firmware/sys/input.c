@@ -62,6 +62,11 @@ static void fw_led_button(uint32_t label, int on) { fm1_led_key(fw_matrix_of(lab
  * Full-bright LED state always wins over the background layer. */
 static void fw_led_button_background(uint32_t level)
 {
+#ifdef FW_HOST
+    /* The host simulator has no FM-1 LED matrix hardware. Audio/button state
+     * tests run normally; brightness requires a physical FM-1 inspection. */
+    (void)level;
+#else
     static uint32_t last_level = 0xFFFFFFFFu;
     static const uint16_t PULSE_NS[4] = {0, 4500, 10500, 22000};
     uint32_t label, col, row;
@@ -79,6 +84,7 @@ static void fw_led_button_background(uint32_t level)
                 if (FM1_KEYMAP[row][col] == id)
                     fm1_led_bg[col] |= (uint8_t)(1u << row);
     }
+#endif /* FW_HOST */
 }
 
 static void fw_led_note_key(uint32_t key, int on) { fm1_led_key(14u + key, on); }
