@@ -1080,7 +1080,10 @@ static void handle_buttons(const fw_input_t *in)
     if ((in->held & FW_BIT(FW_BTN_GLO)) && !glo_long &&
         (uint32_t)(in->ms - glo_press_ms) >= 650u) {
         glo_long = 1;
-        set_page(PAGE_GLOBAL);
+        /* A second long GLO press from GLOBAL opens DEVICE;
+         * from DEVICE it returns to GLOBAL. A tap always switches
+         * STUDIO/MUTANT as before. */
+        set_page(page == PAGE_GLOBAL ? PAGE_DEVICE : PAGE_GLOBAL);
     }
     if (in->released & FW_BIT(FW_BTN_GLO)) {
         if (!glo_long) {
@@ -1088,19 +1091,28 @@ static void handle_buttons(const fw_input_t *in)
             set_page(PAGE_MAIN);
         }
     }
-    /* REC tap captures a temporary RAM checkpoint; holding restores it.
-     * No audio recording, no flash writes, no alteration of saved presets. */
+    /* REC: tap captures, hold 0.65..2s restores, hold >2s clears.
+     * Wait for release before restoring to distinguish the two
+     * long-press gestures WITHOUT restoring while clearing.
+     * The snapshot remains shared between the two machine modes. */
     if (in->pressed & FW_BIT(FW_BTN_REC)) {
         rec_press_ms = in->ms;
         rec_long = 0;
     }
     if ((in->held & FW_BIT(FW_BTN_REC)) && !rec_long &&
-        (uint32_t)(in->ms - rec_press_ms) >= 650u) {
+        (uint32_t)(in->ms - rec_press_ms) >= 2000u) {
         rec_long = 1;
-        mut_restore(in->ms);
+        mut_clear_capture(in->ms);
     }
-    if ((in->released & FW_BIT(FW_BTN_REC)) && !rec_long)
-        mut_checkpoint(in->ms);
+    if (in->released & FW_BIT(FW_BTN_REC)) {
+        if (rec_long) {
+            /* Already cleared; never also capture on release. */
+        } else if ((uint32_t)(in->ms - rec_press_ms) >= 650u) {
+            mut_restore(in->ms);
+        } else {
+            mut_checkpoint(in->ms);
+        }
+    }
     /* HOME cycles Plaits -> LOFI -> VOICE -> CHIP VOX -> ANIMAL -> ANIMAL VOX -> Plaits.
      * One-button access for web emulator; HOME + key still selects exactly. */
     if (was == PAGE_MAIN && (in->pressed & FW_BIT(FW_BTN_HOME)) &&
@@ -1111,11 +1123,17 @@ static void handle_buttons(const fw_input_t *in)
                       patch.engine == MUTANT_ANIMAL_MODEL ? MUTANT_ANIMAL_VOX_MODEL :
                       patch.engine == MUTANT_ANIMAL_VOX_MODEL ? last_plaits_engine : MUTANT_LOFI_MODEL);
     }
+    if ((in->pressed & FW_BIT(FW_BTN_SAVE)) &&
+        (was == PAGE_GLOBAL || was == PAGE_DEVICE)) {
+        /* Explicit device-only SAVE, no preset or bank write. */
+        message(mutant_device_save() == 0 ? "CONFIG SAVED" : "CONFIG ERROR", in->ms);
+    }
     if ((in->pressed & FW_BIT(FW_BTN_SAVE)) && was == PAGE_SAVE) {
         bank_save(save_slot, in->ms);
         set_page(PAGE_MAIN);
     }
-    if ((in->pressed & FW_BIT(FW_BTN_SAVE)) && was != PAGE_SAVE) {
+    if ((in->pressed & FW_BIT(FW_BTN_SAVE)) && was != PAGE_SAVE &&
+        was != PAGE_GLOBAL && was != PAGE_DEVICE) {
         save_slot = bank.current;
         set_page(PAGE_SAVE);
     }
@@ -1313,6 +1331,8 @@ static void handle_knobs(const fw_input_t *in)
         handle_knobs_save(in);
     if (page != PAGE_MAIN && page != PAGE_MATRIX && page != PAGE_SAVE)
         handle_knobs_generic(in);
+    if (page == PAGE_DEVICE || page == PAGE_GLOBAL)
+        device_settings_dirty = 1;
 }
 
 static void update_leds(const fw_input_t *in)
