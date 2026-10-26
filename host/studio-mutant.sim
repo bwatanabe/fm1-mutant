@@ -1,0 +1,108 @@
+# Host-only deterministic button / motion / checkpoint regression
+master 900
+frames 5
+echo STUDIO_BASE
+state
+btn ARP down
+frames 1
+btn ARP up
+frames 2
+echo RANDOM1
+state
+btn ARP down
+frames 1
+btn ARP up
+frames 2
+echo RANDOM2
+state
+btn PLAY down
+frames 1
+btn PLAY up
+frames 2
+echo STUDIO_STEP
+state
+# Tap GLO: one-button STUDIO -> MUTANT, no opening Global page
+btn GLO down
+frames 2
+btn GLO up
+frames 2
+echo MUTANT_IDLE
+state
+# SEQ exposes simple mutation controls; PAGE_MUTANT index 8
+btn SEQ down
+frames 1
+btn SEQ up
+frames 2
+echo MUTANT_CONTROLS
+state
+# Adjust all four mutation parameters with physical FM-1 encoders.
+knob K1 7
+knob K2 8
+knob K3 5
+knob K4 1
+frames 3
+echo MUTANT_ADJUSTED
+state
+# Return to HOME
+btn HOME down
+frames 1
+btn HOME up
+frames 1
+# PLAY starts autonomous drift
+btn PLAY down
+frames 1
+btn PLAY up
+frames 2
+echo MUTANT_RUNNING
+state
+frames 210
+echo MUTANT_EVOLVED
+state
+# REC short = freeze a point-in-time capture, evolution continues
+btn REC down
+frames 2
+btn REC up
+frames 2
+echo MUTANT_CAPTURE
+state
+frames 120
+echo MUTANT_LATER
+state
+# REC long = restore the captured sound and stop evolution
+btn REC down
+frames 48
+echo MUTANT_RESTORED
+state
+btn REC up
+frames 2
+echo RESTORE_RELEASED
+state
+# GLO long = GLOBAL page (index 6), NOT toggle machine
+btn GLO down
+frames 48
+echo GLO_LONG
+state
+btn GLO up
+frames 2
+echo GLO_LONG_RELEASE
+state
+# HOME returns us; GLO tap returns to Studio
+btn HOME down
+frames 1
+btn HOME up
+frames 2
+btn GLO down
+frames 2
+btn GLO up
+frames 2
+echo STUDIO_AGAIN
+state
+# Existing MIDI note input still works after mutation/session
+midi 0xB0 27 24
+frames 2
+midi 0x90 60 112
+frames 80
+midi 0x80 60 0
+frames 20
+wav build/host/out/studio-mutant.wav
+quit
