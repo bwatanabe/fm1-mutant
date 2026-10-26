@@ -514,7 +514,12 @@ static int mutant_device_save(void)
 
 static void preset_select(uint32_t i)
 {
-    bank.current = (uint16_t)(i % PRESETS);
+    i %= PRESETS;
+    if (!(bank.used & (1u << i))) {
+        message("EMPTY SLOT", fm1_ms);
+        return; /* empty patches cannot be recalled */
+    }
+    bank.current = (uint16_t)i;
     fm1_irq_off();
     patch = bank.preset[bank.current];
     fm1_irq_on();
@@ -573,27 +578,28 @@ static void bank_save(uint32_t slot, uint32_t now)
 static void bank_delete(uint32_t slot, uint32_t now)
 {
     const uint32_t previous = bank.used;
+    const uint16_t old_current = bank.current;
     uint32_t i;
     if (slot >= PRESETS || !(bank.used & (1u << slot))) {
         message("EMPTY SLOT", now);
         return;
     }
     bank.used &= ~(1u << slot);
+    if (bank.current == slot) {
+        for (i = 0; i < PRESETS; ++i)
+            if (bank.used & (1u << i)) {
+                bank.current = (uint16_t)i;
+                break;
+            }
+    }
     if (fw_store_save(0, &bank, sizeof bank) != 0) {
         bank.used = previous;
+        bank.current = old_current;
         message("DELETE FAILED", now);
         return;
     }
     delete_armed = 0;
     name_staged = 0;
-    if (bank.current == slot) {
-        for (i=0; i<PRESETS; ++i) {
-            if (bank.used & (1u << i)) {
-                bank.current = (uint16_t)i; /* next reboot uses live sound */
-                break;
-            }
-        }
-    }
     message("PATCH DELETED", now);
     dirty = D_ALL;
 }
@@ -854,13 +860,13 @@ static void draw_enc_line(void)
     if (page == PAGE_MATRIX)
         str_cpy(b, "SEL SLOT  K1 SRC K2 DST K3/4 AMT", sizeof b);
     if (page == PAGE_SAVE)
-        str_cpy(b, delete_armed ? "REC=DELETE ARMED  ARP=CANCEL" : "EDIT=NAME  REC HOLD=DELETE", sizeof b);
+        str_cpy(b, delete_armed ? "REC=CONFIRM DEL  SAVE=CANCEL" : "EDIT=NAME  REC HOLD=DEL", sizeof b);
     if (page == PAGE_NAME)
         str_cpy(b, "SEL=CURSOR  ALGO=CHAR  SAVE=OK", sizeof b);
     if (page == PAGE_CLOCK)
         str_cpy(b, "SEQ=MUTATION  CLOCK=TARGETS", sizeof b);
     if (page == PAGE_MUTANT)
-        str_cpy(b, "ARP=RND  PLAY=MUT/RUN  REC=CAP", sizeof b);
+        str_cpy(b, "SEQ=CLOCK  PLAY=MUT/RUN", sizeof b);
     for (i = 0; page != PAGE_MAIN && page != PAGE_MATRIX &&
          page != PAGE_SAVE && page != PAGE_NAME && i < 2u; i++) {
         if (!pg->enc[i].label)
@@ -1356,6 +1362,15 @@ static void handle_midi_cc(uint32_t cc, uint32_t v)
         dirty |= FW_BIT(D_HEADER) | 0x1Eu;
         return;
     }
+    if (cc >= 50u && cc <= 52u) {
+        if (cc == 50u) mut_clock_mode = (int16_t)(v * MUT_CLK_COUNT / 128u);
+        else if (cc == 51u) mut_bpm = (int16_t)(40 + v * 200u / 127u);
+        else mut_div = (int16_t)(v * 5u / 128u);
+        /* Refresh the target phase following external tempo/clock edits. */
+        if (mut_running) mut_reanchor(fm1_ms);
+        dirty = D_ALL;
+        return;
+    }
     if (cc == 44u) {
         if (mut_machine && (!!mut_running != (v >= 64u)))
             mut_toggle_run(fm1_ms);
@@ -1431,6 +1446,12 @@ static void handle_midi(void)
     fw_midi_t m;
     while (fw_midi_read(&m)) {
         const uint32_t kind = m.status & 0xF0u, ch = (m.status & 15u) + 1u;
+        /* System realtime timing is channel-less and must be handled BEFORE
+         * the MIDI receive channel filter. */
+        if (m.status >= 0xF8u) {
+            mut_clock_receive(m.status, fm1_ms);
+            continue;
+        }
         if (kind < 0x80u || kind == 0xF0u)
             continue;
         if (global.channel && (uint32_t)global.channel != ch)
@@ -1490,12 +1511,41 @@ static void handle_knobs_matrix(const fw_input_t *in)
     }
 }
 
+static void handle_knobs_name(const fw_input_t *in)
+{
+    static const char ALPHABET[] = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_";
+    const int32_t length = (int32_t)str_len(ALPHABET);
+    const int32_t cursor = in->knob[FW_KNOB_SELECT] +
+                           in->knob[FW_KNOB_1];
+    const int32_t delta = in->knob[FW_KNOB_ALGO] +
+                          in->knob[FW_KNOB_2];
+    if (cursor) {
+        name_cursor = (uint8_t)clampi((int32_t)name_cursor + cursor,
+                                      0, PATCH_NAME - 2);
+        dirty = D_ALL;
+    }
+    if (delta) {
+        int32_t k;
+        char c = name_draft[name_cursor];
+        for (k=0; k<length; ++k) if (ALPHABET[k] == c) break;
+        if (k == length) k = 0;
+        k = (k + delta % length + length) % length;
+        name_draft[name_cursor] = ALPHABET[k];
+        if (name_draft[name_cursor + 1] == 0 &&
+            name_cursor + 1 < PATCH_NAME - 1)
+            name_draft[name_cursor + 1] = 0;
+        dirty = D_ALL;
+    }
+}
+
 static void handle_knobs_save(const fw_input_t *in)
 {
     const int32_t d = in->knob[FW_KNOB_SELECT] + in->knob[FW_KNOB_ALGO] + in->knob[FW_KNOB_1];
     if (!d)
         return;
     save_slot = (uint32_t)(((int32_t)save_slot + d) % (int32_t)PRESETS + (int32_t)PRESETS) % PRESETS;
+    delete_armed = 0;
+    name_staged = 0;
     dirty |= 0x0Eu;
 }
 
@@ -1519,7 +1569,7 @@ static void handle_knobs(const fw_input_t *in)
 {
     const int32_t p = in->knob[FW_KNOB_PRESET];
     knob_speed(in);
-    if (p && page != PAGE_SAVE) {
+    if (p && page != PAGE_SAVE && page != PAGE_NAME) {
         preset_select((uint32_t)(((int32_t)bank.current + p) % (int32_t)PRESETS + (int32_t)PRESETS));
         clear_page();
         return;
@@ -1530,7 +1580,10 @@ static void handle_knobs(const fw_input_t *in)
         handle_knobs_matrix(in);
     if (page == PAGE_SAVE)
         handle_knobs_save(in);
-    if (page != PAGE_MAIN && page != PAGE_MATRIX && page != PAGE_SAVE)
+    if (page == PAGE_NAME)
+        handle_knobs_name(in);
+    if (page != PAGE_MAIN && page != PAGE_MATRIX &&
+        page != PAGE_SAVE && page != PAGE_NAME)
         handle_knobs_generic(in);
     if (page == PAGE_DEVICE || page == PAGE_GLOBAL)
         device_settings_dirty = 1;
@@ -1539,7 +1592,7 @@ static void handle_knobs(const fw_input_t *in)
 static void update_leds(const fw_input_t *in)
 {
     static const uint8_t PAGE_LED[PAGES] = {FW_BTN_HOME, FW_BTN_SCL, FW_BTN_FX, FW_BTN_ENV, FW_BTN_LFO, FW_BTN_EDIT,
-                                            FW_BTN_GLO, FW_BTN_SAVE, FW_BTN_SEQ, FW_BTN_GLO};
+                                            FW_BTN_GLO, FW_BTN_SAVE, FW_BTN_SEQ, FW_BTN_GLO, FW_BTN_EDIT, FW_BTN_SEQ};
     uint32_t i;
     for (i = 0; i < PAGES; i++)
         fw_led_button(PAGE_LED[i], i == page);
