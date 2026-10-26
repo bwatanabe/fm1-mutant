@@ -114,3 +114,33 @@ jobs:
           (cd build/mutant-site/firmware && sha256sum -c SHA256SUMS)
           python3 web/make_site.py
           (cd build/site/firmware && sha256sum -c SHA256SUMS)
+
+      # New workflow files created only on experimental branches may not be
+      # scheduled until they are present on the default branch. Package the
+      # already-verified experimental image here, after all CI tests, so the
+      # user can download the exact combined firmware without publishing main.
+      - name: Build v0.9.1 combined test firmware
+        if: github.ref == 'refs/heads/feature/performance-v091' || github.head_ref == 'feature/performance-v091'
+        run: |
+          set -euo pipefail
+          ./build.sh --app gator --name mutant
+          node web/test_web.mjs build/mutant.fwsc
+          python3 web/make_mutant_site.py --version "v0.9.1-dev-${GITHUB_SHA:0:7}"
+          (cd build/mutant-site/firmware && sha256sum -c SHA256SUMS)
+      - name: Upload v0.9.1 firmware artifact
+        if: github.ref == 'refs/heads/feature/performance-v091' || github.head_ref == 'feature/performance-v091'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutant-v091-firmware-test
+          path: |
+            build/mutant.fwsc
+            build/host/out/studio-mutant.log
+            build/host/out/midi-performance.log
+          if-no-files-found: error
+      - name: Upload v0.9.1 test preview website
+        if: github.ref == 'refs/heads/feature/performance-v091' || github.head_ref == 'feature/performance-v091'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutant-v091-preview-site
+          path: build/mutant-site/
+          if-no-files-found: error
