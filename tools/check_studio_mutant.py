@@ -11,8 +11,15 @@ path = Path(sys.argv[1] if len(sys.argv) > 1 else "build/host/out/studio-mutant.
 snapshots = {}
 label = None
 for line in path.read_text().splitlines():
-    if line.startswith("echo "):
-        label = line.split()[1]
+    # host/sim.c's echo command prints the arguments WITHOUT the "echo"
+    # prefix. Test labels are unambiguous, uppercase single-word markers.
+    if line.split() and line.split()[0] in {
+        "STUDIO_BASE", "RANDOM1", "RANDOM2", "STUDIO_STEP", "MUTANT_IDLE",
+        "MUTANT_CONTROLS", "MUTANT_RUNNING", "MUTANT_EVOLVED", "MUTANT_CAPTURE",
+        "MUTANT_LATER", "MUTANT_RESTORED", "RESTORE_RELEASED",
+        "GLO_LONG", "GLO_LONG_RELEASE", "STUDIO_AGAIN"
+    }:
+        label = line.split()[0]
     if line.startswith("STATE "):
         assert label, "state line without label"
         snapshots[label] = dict(re.findall(r"([a-z_]+)=([A-Za-z0-9]+)", line))
