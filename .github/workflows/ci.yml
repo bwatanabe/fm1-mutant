@@ -5,7 +5,7 @@ name: ci
 
 on:
   push:
-    branches: [main, feature/felucca-lofi, feature/plaits-lofi, feature/jiant-formant, feature/lofi-formant, feature/chip-vox-motion, feature/jiant-animal, feature/animal-formant, feature/studio-mutant-v09, feature/performance-v091]
+    branches: [main, feature/felucca-lofi, feature/plaits-lofi, feature/jiant-formant, feature/lofi-formant, feature/chip-vox-motion, feature/jiant-animal, feature/animal-formant, feature/studio-mutant-v09, feature/performance-v091, feature/patch-library-clock-v010]
   pull_request:
   workflow_dispatch:
 
@@ -143,4 +143,12 @@ jobs:
         with:
           name: mutant-v091-preview-site
           path: build/mutant-site/
+          if-no-files-found: error
+
+      - name: Upload v0.10 experimental firmware
+        if: github.ref == 'refs/heads/feature/patch-library-clock-v010'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutant-v010-firmware-test
+          path: build/mutant.fwsc
           if-no-files-found: error
