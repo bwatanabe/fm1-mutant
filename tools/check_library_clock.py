@@ -14,7 +14,7 @@ def snapshots(path, tag, markers):
         if parts and parts[0] in wanted:
             last = parts[0]
         elif line.startswith(tag + " ") and last:
-            found[last] = dict(re.findall(r"([a-z_]+)=([A-Za-z0-9]+)", line))
+            found[last] = dict(re.findall(r"([a-z_][a-z_0-9]*)=([A-Za-z0-9]+)", line))
             last = None
     for marker in markers:
         assert marker in found, f"{path}: missing {marker}"
@@ -28,7 +28,7 @@ def hasbit(label, bit):
     return bool(int(lib[label]["used"], 16) & (1 << bit))
 
 assert lib["MIGRATED"]["ver"] == "2", "old 16-slot bank did not migrate in RAM"
-assert lib["MIGRATED"]["patch"] == "777" or lib["MIGRATED"].get("patch3") == "777", "v1 patch 4 changed"
+assert lib["MIGRATED"]["patch3"] == "777", "v1 patch 4 changed"
 assert int(lib["MIGRATED"]["bytes"]) == int(lib["MIGRATED"]["legacy"]), "old format not preserved until SAVE"
 assert int(lib["RENAMED_EXISTING"]["bytes"]) > int(lib["MIGRATED"]["bytes"]), "new 32-slot bank not persisted"
 assert lib["RENAMED_EXISTING"]["name"].startswith("QATCH"), "rename did not edit name"
