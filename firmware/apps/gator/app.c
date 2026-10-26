@@ -14,16 +14,18 @@
 #include "animal_host.c"
 #include "animal_vox_host.c"
 
-#define PRESETS 16u
+#define PRESETS 32u
+#define LEGACY_PRESETS 16u
+#define PATCH_NAME 12u
 #define BANK_MAGIC 0x4D43524Fu
-#define BANK_VERSION 1u
+#define BANK_VERSION 2u
 #define KEY_VELOCITY 100u
 #define SCOPE_N 240u
 #define ROW_H 28u
 #define DRAWS_PER_FRAME 2u
 #define CPU_GUARD_Q8 218u
 
-enum { PAGE_MAIN, PAGE_ATTN, PAGE_LPG, PAGE_ENV, PAGE_LFO, PAGE_MATRIX, PAGE_GLOBAL, PAGE_SAVE, PAGE_MUTANT, PAGE_DEVICE, PAGES };
+enum { PAGE_MAIN, PAGE_ATTN, PAGE_LPG, PAGE_ENV, PAGE_LFO, PAGE_MATRIX, PAGE_GLOBAL, PAGE_SAVE, PAGE_MUTANT, PAGE_DEVICE, PAGE_NAME, PAGE_CLOCK, PAGES };
 enum { FMT_100, FMT_BIP, FMT_INT, FMT_SEMI, FMT_ENUM, FMT_ONOFF, FMT_CHANNEL, FMT_TIME };
 enum { D_HEADER = 0, D_ROW0 = 1, D_ENC = 12, D_SCOPE = 13, D_STATUS = 14, D_ALL = 0x7FFFu };
 
@@ -45,7 +47,9 @@ typedef struct {
     uint32_t magic;
     uint16_t version, current;
     macro_global_t global;
-    macro_patch_t preset[PRESETS];
+    macro_patch_t preset[PRESETS];  /* first 16 offsets match v1 exactly */
+    char names[PRESETS][PATCH_NAME];
+    uint32_t used;               /* 1 = named sound, 0 = free slot */
 } bank_t;
 
 static const char *const MODEL_NAME[MUTANT_ENGINES] = {
@@ -96,6 +100,9 @@ typedef struct {
 static int16_t button_glow = 2;
 static uint8_t device_settings_dirty;
 static uint32_t page = PAGE_MAIN, route_sel, save_slot, dirty = D_ALL, frame_count;
+static char name_draft[PATCH_NAME];
+static uint8_t name_cursor, name_staged, delete_armed;
+static uint32_t delete_armed_at;
 static int32_t octave;
 static uint32_t hold, key_held;
 static int32_t knob_fast[FW_KNOB_COUNT];
@@ -341,6 +348,18 @@ static void route_set(macro_patch_t *p, uint32_t i, int32_t src, int32_t dst, in
     p->route[i].amount = (int16_t)amount;
 }
 
+static void library_name_default(uint32_t i)
+{
+    char n[12];
+    bank.names[i][0] = 0;
+    str_cpy(bank.names[i], "PATCH ", PATCH_NAME);
+    fmt_int(n, (int32_t)i + 1);
+    str_cpy(bank.names[i] + str_len(bank.names[i]), n,
+            PATCH_NAME - str_len(bank.names[i]));
+}
+
+/* v1 bank is a strict prefix of the v2 patch array; no destructive
+ * reinitialization is necessary. The exact old byte length is checked. */
 static void factory_bank(void)
 {
     static const int16_t E[PRESETS][4] = {
@@ -357,11 +376,15 @@ static void factory_bank(void)
     bank.global.volume = 256;
     for (i = 0; i < PRESETS; i++) {
         macro_patch_t *p = &bank.preset[i];
-        patch_init(p, E[i][0]);
-        p->harmonics = E[i][1];
-        p->timbre = E[i][2];
-        p->morph = E[i][3];
+        patch_init(p, i < LEGACY_PRESETS ? E[i][0] : 0);
+        if (i < LEGACY_PRESETS) {
+            p->harmonics = E[i][1];
+            p->timbre = E[i][2];
+            p->morph = E[i][3];
+        }
+        library_name_default(i);
     }
+    bank.used = 0x0000FFFFu; /* factory sounds occupy first 16 */
     route_set(&bank.preset[0], 0, SRC_LFO1, DST_PITCH, 2);
     bank.preset[0].lfo_rate[0] = 620;
     route_set(&bank.preset[1], 0, SRC_ENV, DST_TIMBRE, 45);
@@ -425,11 +448,29 @@ static void patch_sanitize(macro_patch_t *p)
 static void bank_load(void)
 {
     const int n = fw_store_load(0, &bank, sizeof bank);
+    const int old_n = (int)(sizeof bank.magic + sizeof bank.version +
+                            sizeof bank.current + sizeof bank.global +
+                            LEGACY_PRESETS * sizeof(macro_patch_t));
     uint32_t i;
-    if (n != (int)sizeof bank || bank.magic != BANK_MAGIC || bank.version != BANK_VERSION || bank.current >= PRESETS)
+    if (n == old_n && bank.magic == BANK_MAGIC && bank.version == 1u &&
+        bank.current < LEGACY_PRESETS) {
+        /* SAFE v1 migration: preserve all first 16 patches verbatim. Never
+         * write the migrated bank to flash until the user explicitly SAVEs. */
+        for (i = 0; i < PRESETS; ++i) {
+            library_name_default(i);
+            if (i >= LEGACY_PRESETS)
+                patch_init(&bank.preset[i], 0);
+        }
+        bank.used = 0x0000FFFFu;
+        bank.version = BANK_VERSION;
+    } else if (n != (int)sizeof bank || bank.magic != BANK_MAGIC ||
+               bank.version != BANK_VERSION || bank.current >= PRESETS) {
         factory_bank();
-    for (i = 0; i < PRESETS; i++)
+    }
+    for (i = 0; i < PRESETS; i++) {
         patch_sanitize(&bank.preset[i]);
+        bank.names[i][PATCH_NAME - 1u] = 0;
+    }
     clamp16(&bank.global.bend_range, 0, 12);
     clamp16(&bank.global.fine, -100, 100);
     clamp16(&bank.global.legato, 0, 1);
@@ -493,16 +534,60 @@ static int edited(void) { return memcmp(&patch, &bank.preset[bank.current], size
 
 static void bank_save(uint32_t slot, uint32_t now)
 {
+    macro_patch_t previous;
+    char previous_name[PATCH_NAME];
     const uint16_t keep = bank.current;
+    const uint32_t used = bank.used;
+    const macro_global_t prev_global = bank.global;
+    if (slot >= PRESETS) return;
+    previous = bank.preset[slot];
+    memcpy(previous_name, bank.names[slot], PATCH_NAME);
     bank.preset[slot] = patch;
+    if (name_staged) memcpy(bank.names[slot], name_draft, PATCH_NAME);
+    else if (!(bank.used & (1u << slot))) library_name_default(slot);
+    bank.names[slot][PATCH_NAME-1] = 0;
+    bank.used |= 1u << slot;
     bank.current = (uint16_t)slot;
     bank.global = global;
     if (fw_store_save(0, &bank, sizeof bank) == 0) {
-        message("SAVED", now);
+        name_staged = 0;
+        message("PATCH SAVED", now);
         return;
     }
     bank.current = keep;
+    bank.used = used;
+    bank.global = prev_global;
+    bank.preset[slot] = previous;
+    memcpy(bank.names[slot], previous_name, PATCH_NAME);
     message("SAVE FAILED", now);
+}
+
+static void bank_delete(uint32_t slot, uint32_t now)
+{
+    const uint32_t previous = bank.used;
+    uint32_t i;
+    if (slot >= PRESETS || !(bank.used & (1u << slot))) {
+        message("EMPTY SLOT", now);
+        return;
+    }
+    bank.used &= ~(1u << slot);
+    if (fw_store_save(0, &bank, sizeof bank) != 0) {
+        bank.used = previous;
+        message("DELETE FAILED", now);
+        return;
+    }
+    delete_armed = 0;
+    name_staged = 0;
+    if (bank.current == slot) {
+        for (i=0; i<PRESETS; ++i) {
+            if (bank.used & (1u << i)) {
+                bank.current = (uint16_t)i; /* next reboot uses live sound */
+                break;
+            }
+        }
+    }
+    message("PATCH DELETED", now);
+    dirty = D_ALL;
 }
 
 static int adjust(int16_t *v, int32_t d, int32_t step, int32_t lo, int32_t hi)
