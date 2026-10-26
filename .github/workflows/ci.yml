@@ -5,7 +5,7 @@ name: ci
 
 on:
   push:
-    branches: [main, feature/felucca-lofi, feature/plaits-lofi, feature/jiant-formant, feature/lofi-formant, feature/chip-vox-motion, feature/jiant-animal, feature/animal-formant, feature/studio-mutant-v09]
+    branches: [main, feature/felucca-lofi, feature/plaits-lofi, feature/jiant-formant, feature/lofi-formant, feature/chip-vox-motion, feature/jiant-animal, feature/animal-formant, feature/studio-mutant-v09, feature/performance-v091]
   pull_request:
   workflow_dispatch:
 
@@ -98,7 +98,8 @@ jobs:
           python3 tools/sim.py host/animalvox-cmos-dry.sim
           python3 tools/check_animal_vox_wav.py
           python3 tools/sim.py host/studio-mutant.sim > build/host/out/studio-mutant.log
-          python3 tools/check_studio_mutant.py build/host/out/studio-mutant.log
+          python3 tools/sim.py host/midi-performance.sim > build/host/out/midi-performance.log
+          python3 tools/check_studio_mutant.py build/host/out/studio-mutant.log build/host/out/midi-performance.log
           python3 tools/sim.py --app demo
           python3 tools/sim.py --app mutant
           python3 tools/sim.py --test
