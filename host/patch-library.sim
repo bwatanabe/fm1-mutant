@@ -1,0 +1,70 @@
+# v0.10 true legacy bank migration and named-sound editing
+master 900
+frames 3
+legacy_bank
+echo MIGRATED
+library_state
+btn SAVE down
+frames 1
+btn SAVE up
+frames 2
+echo LIBRARY
+library_state
+# EDIT from browser enters NAME. Rename slot 1 without replacing its patch.
+btn EDIT down
+frames 1
+btn EDIT up
+frames 2
+knob ALGO 1
+frames 2
+btn SAVE down
+frames 1
+btn SAVE up
+frames 2
+echo RENAMED_EXISTING
+library_state
+# Next, select previously empty slot 25 and save the current sound+custom name.
+knob SELECT 24
+frames 3
+echo EMPTY_25
+library_state
+btn EDIT down
+frames 1
+btn EDIT up
+frames 2
+knob ALGO 1
+frames 2
+btn SAVE down
+frames 1
+btn SAVE up
+frames 2
+btn SAVE down
+frames 1
+btn SAVE up
+frames 2
+echo SAVED_25
+library_state
+library_reload
+echo RELOADED_25
+library_state
+# SAVE from home returns to library at current slot25.
+btn SAVE down
+frames 1
+btn SAVE up
+frames 2
+btn REC down
+frames 145
+btn REC up
+frames 2
+echo DELETE_ARMED
+library_state
+btn REC down
+frames 1
+btn REC up
+frames 2
+echo DELETED_25
+library_state
+library_reload
+echo DELETE_PERSISTED
+library_state
+quit
