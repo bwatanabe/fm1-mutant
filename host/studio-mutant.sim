@@ -35,6 +35,14 @@ btn SEQ up
 frames 2
 echo MUTANT_CONTROLS
 state
+# Adjust all four mutation parameters with physical FM-1 encoders.
+knob K1 7
+knob K2 8
+knob K3 5
+knob K4 1
+frames 3
+echo MUTANT_ADJUSTED
+state
 # Return to HOME
 btn HOME down
 frames 1
