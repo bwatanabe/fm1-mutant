@@ -77,8 +77,8 @@ if len(sys.argv) > 2:
     }
     states, label = {}, None
     for line in Path(sys.argv[2]).read_text().splitlines():
-        if line in midi_labels:
-            label = line
+        if line.split() and line.split()[0] in midi_labels:
+            label = line.split()[0]
         elif line.startswith("STATE ") and label:
             states[label] = dict(re.findall(r"([a-z_]+)=([A-Za-z0-9]+)", line))
     for key in midi_labels:
