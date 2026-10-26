@@ -575,6 +575,22 @@ static void bank_save(uint32_t slot, uint32_t now)
     message("SAVE FAILED", now);
 }
 
+/* Rename an occupied patch WITHOUT overwriting its saved sound. */
+static void bank_rename(uint32_t slot, const char name[PATCH_NAME], uint32_t now)
+{
+    char prior[PATCH_NAME];
+    if (slot >= PRESETS || !(bank.used & (1u << slot))) return;
+    memcpy(prior, bank.names[slot], PATCH_NAME);
+    memcpy(bank.names[slot], name, PATCH_NAME);
+    bank.names[slot][PATCH_NAME - 1u] = 0;
+    if (fw_store_save(0, &bank, sizeof bank) != 0) {
+        memcpy(bank.names[slot], prior, PATCH_NAME);
+        message("NAME ERROR", now);
+    } else {
+        message("NAME SAVED", now);
+    }
+}
+
 static void bank_delete(uint32_t slot, uint32_t now)
 {
     const uint32_t previous = bank.used;
@@ -1294,8 +1310,13 @@ static void handle_buttons(const fw_input_t *in)
     }
     if ((in->pressed & FW_BIT(FW_BTN_SAVE)) && was == PAGE_NAME) {
         name_draft[PATCH_NAME - 1] = 0;
-        name_staged = 1;
-        set_page(PAGE_SAVE); /* one more SAVE commits sound+name */
+        if (bank.used & (1u << save_slot)) {
+            bank_rename(save_slot, name_draft, in->ms);
+            name_staged = 0; /* leave original saved sound intact */
+        } else {
+            name_staged = 1; /* staged for first SAVE of new sound */
+        }
+        set_page(PAGE_SAVE);
     }
     if ((in->pressed & FW_BIT(FW_BTN_SAVE)) && was != PAGE_SAVE &&
         was != PAGE_NAME && was != PAGE_GLOBAL && was != PAGE_DEVICE) {
