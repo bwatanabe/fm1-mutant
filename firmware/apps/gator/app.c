@@ -23,7 +23,7 @@
 #define DRAWS_PER_FRAME 2u
 #define CPU_GUARD_Q8 218u
 
-enum { PAGE_MAIN, PAGE_ATTN, PAGE_LPG, PAGE_ENV, PAGE_LFO, PAGE_MATRIX, PAGE_GLOBAL, PAGE_SAVE, PAGE_MUTANT, PAGES };
+enum { PAGE_MAIN, PAGE_ATTN, PAGE_LPG, PAGE_ENV, PAGE_LFO, PAGE_MATRIX, PAGE_GLOBAL, PAGE_SAVE, PAGE_MUTANT, PAGE_DEVICE, PAGES };
 enum { FMT_100, FMT_BIP, FMT_INT, FMT_SEMI, FMT_ENUM, FMT_ONOFF, FMT_CHANNEL, FMT_TIME };
 enum { D_HEADER = 0, D_ROW0 = 1, D_ENC = 12, D_SCOPE = 13, D_STATUS = 14, D_ALL = 0x7FFFu };
 
@@ -81,6 +81,20 @@ static macro_patch_t patch;
 static macro_global_t global;
 static macro_monitor_t mon;
 static bank_t bank;
+/* Slot 0 is the unchanged legacy sixteen-preset bank. The previously
+ * unused second A/B storage object holds small device-only settings,
+ * tagged with a version and magic to reject unrelated old content.
+ * Only an explicit SAVE while on GLOBAL writes this new object. */
+#define MUT_DEVICE_MAGIC 0x3144564Du /* MVD1 */
+typedef struct {
+    uint32_t magic;
+    uint16_t version;
+    int16_t midi_channel;    /* OMNI=0; otherwise 1..16 */
+    int16_t button_glow;     /* 0 off, 1 dim, 2 med, 3 brighter */
+    uint16_t reserved;
+} mutant_device_config_t;
+static int16_t button_glow = 2;
+static uint8_t device_settings_dirty;
 static uint32_t page = PAGE_MAIN, route_sel, save_slot, dirty = D_ALL, frame_count;
 static int32_t octave;
 static uint32_t hold, key_held;
@@ -266,6 +280,11 @@ static const page_t PAGE_DEF[PAGES] = {
         {"INSTAB", &mut_instability, 0, 100, 2, FMT_INT, 0},
         {"STYLE", &mut_style, 0, MUT_STYLES - 1, 1, FMT_ENUM, MUT_STYLE_NAME}},
         {{0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0}}},
+    [PAGE_DEVICE] = {"DEVICE", {
+        {"BUTTON LIGHT", &button_glow, 0, 3, 1, FMT_INT, 0},
+        {"MIDI CH", &global.channel, 0, 16, 1, FMT_CHANNEL, 0},
+        {0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0}},
+        {{0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0}}},
     [PAGE_GLOBAL] = {"GLOBAL", {
         {"GLIDE", &patch.glide, 0, 1000, 10, FMT_100, 0},
         {"BEND RANGE", &global.bend_range, 0, 12, 1, FMT_SEMI, 0},
@@ -411,6 +430,33 @@ static void bank_load(void)
     clamp16(&bank.global.fine, -100, 100);
     clamp16(&bank.global.legato, 0, 1);
     clamp16(&bank.global.channel, 0, 16);
+}
+
+static void mutant_device_load(void)
+{
+    mutant_device_config_t c;
+    const int n = fw_store_load(1, &c, sizeof c);
+    if (n == (int)sizeof c && c.magic == MUT_DEVICE_MAGIC &&
+        c.version == 1u && c.midi_channel >= 0 && c.midi_channel <= 16 &&
+        c.button_glow >= 0 && c.button_glow <= 3) {
+        global.channel = c.midi_channel;
+        button_glow = c.button_glow;
+    }
+    device_settings_dirty = 0;
+}
+
+static int mutant_device_save(void)
+{
+    mutant_device_config_t c;
+    memset(&c, 0, sizeof c);
+    c.magic = MUT_DEVICE_MAGIC;
+    c.version = 1;
+    c.midi_channel = global.channel;
+    c.button_glow = button_glow;
+    if (fw_store_save(1, &c, sizeof c) != 0)
+        return -1;
+    device_settings_dirty = 0;
+    return 0;
 }
 
 static void preset_select(uint32_t i)
@@ -905,6 +951,8 @@ static void draw_strip(uint32_t bit)
         draw_title("SAVE", "PRESET");
     if (bit == D_HEADER && page == PAGE_MUTANT)
         draw_title("MUTATION", mut_machine ? "MUTANT" : "STUDIO");
+    if (bit == D_HEADER && page == PAGE_DEVICE)
+        draw_title("DEVICE", "SAVE=CONFIG");
     if (bit == D_HEADER && page != PAGE_MAIN && page != PAGE_MATRIX &&
         page != PAGE_SAVE && page != PAGE_MUTANT)
         draw_title(PAGE_DEF[page].title, 0);
@@ -1270,13 +1318,14 @@ static void handle_knobs(const fw_input_t *in)
 static void update_leds(const fw_input_t *in)
 {
     static const uint8_t PAGE_LED[PAGES] = {FW_BTN_HOME, FW_BTN_SCL, FW_BTN_FX, FW_BTN_ENV, FW_BTN_LFO, FW_BTN_EDIT,
-                                            FW_BTN_GLO, FW_BTN_SAVE, FW_BTN_SEQ};
+                                            FW_BTN_GLO, FW_BTN_SAVE, FW_BTN_SEQ, FW_BTN_GLO};
     uint32_t i;
     for (i = 0; i < PAGES; i++)
         fw_led_button(PAGE_LED[i], i == page);
     fw_led_button(FW_BTN_GLO, mut_machine || page == PAGE_GLOBAL);
     fw_led_button(FW_BTN_PLAY, mut_running);
     fw_led_button(FW_BTN_REC, mut_have_capture);
+    fw_led_button_background((uint32_t)button_glow);
     if (in->held & FW_BIT(FW_BTN_HOME)) {
         fw_leds_keys(FW_BIT(patch.engine));
         return;
@@ -1288,6 +1337,7 @@ static void app_init(void)
 {
     bank_load();
     global = bank.global;
+    mutant_device_load();  /* optional slot 1 overrides legacy channel */
     preset_select(bank.current);
     if (patch.engine < MUTANT_LOFI_MODEL)
         last_plaits_engine = patch.engine;
