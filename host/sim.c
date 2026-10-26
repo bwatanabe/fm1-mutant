@@ -197,6 +197,19 @@ static int host_command(char *line)
         host_bench((uint32_t)atoi(a));
     if (str_eq(cmd, "echo"))
         printf("%s %s %s\n", a, b, c);
+    if (str_eq(cmd, "state")) {
+        uint32_t i;
+        uint32_t hash = 2166136261u, bank_hash = 2166136261u;
+        for (i = 0; i < MUT_FIELDS; ++i) {
+            hash = (hash ^ (uint16_t)*mut_field(&patch, i)) * 16777619u;
+            bank_hash = (bank_hash ^ (uint16_t)*mut_field(&bank.preset[bank.current], i)) * 16777619u;
+        }
+        printf("STATE machine=%s run=%u capture=%u engine=%d page=%u hash=%08x bank=%08x "
+               "depth=%d speed=%d instability=%d style=%d ms=%u\n",
+               mut_machine ? "MUTANT" : "STUDIO", mut_running, mut_have_capture,
+               patch.engine, page, hash, bank_hash, mut_depth, mut_speed,
+               mut_instability, mut_style, fm1_ms);
+    }
     if (str_eq(cmd, "logo"))
         draw_logo();
     if (str_eq(cmd, "leds"))
