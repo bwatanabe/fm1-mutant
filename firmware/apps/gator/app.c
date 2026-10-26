@@ -22,7 +22,7 @@
 #define DRAWS_PER_FRAME 2u
 #define CPU_GUARD_Q8 218u
 
-enum { PAGE_MAIN, PAGE_ATTN, PAGE_LPG, PAGE_ENV, PAGE_LFO, PAGE_MATRIX, PAGE_GLOBAL, PAGE_SAVE, PAGES };
+enum { PAGE_MAIN, PAGE_ATTN, PAGE_LPG, PAGE_ENV, PAGE_LFO, PAGE_MATRIX, PAGE_GLOBAL, PAGE_SAVE, PAGE_MUTANT, PAGES };
 enum { FMT_100, FMT_BIP, FMT_INT, FMT_SEMI, FMT_ENUM, FMT_ONOFF, FMT_CHANNEL, FMT_TIME };
 enum { D_HEADER = 0, D_ROW0 = 1, D_ENC = 12, D_SCOPE = 13, D_STATUS = 14, D_ALL = 0x7FFFu };
 
@@ -100,6 +100,13 @@ static int16_t last_plaits_engine = 0;
 static macro_patch_t plaits_cached, lofi_cached, voice_cached, hybrid_cached, animal_cached, animal_vox_cached;
 static uint8_t have_plaits_cache, have_lofi_cache, have_voice_cache, have_hybrid_cache, have_animal_cache,
                have_animal_vox_cache;
+
+/* Mutant behavior needs the same app patch and UI state; include before
+ * PAGE_DEF so its four control parameters can be bound to native knobs. */
+static void message(const char *s, uint32_t now);
+#include "mutant_behavior.c"
+static uint32_t glo_press_ms, rec_press_ms;
+static uint8_t glo_long, rec_long;
 
 /* New engine imports should preserve the old preset format.
  * On FIRST switching from Plaits to LOFI, load Felucca's own clean
@@ -184,6 +191,7 @@ static void switch_engine(int16_t next)
     const int16_t prior = patch.engine;
     if (next < 0 || next >= MUTANT_ENGINES || next == prior)
         return;
+    mut_stop(); /* never let an old engine's targets drive a new engine */
     macro_all_notes_off();
     lo_all_off();
     vo_all_off();
@@ -251,13 +259,19 @@ static const page_t PAGE_DEF[PAGES] = {
         {"LFO2 WAVE", &patch.lfo_shape[1], 0, LFO_SHAPES - 1, 1, FMT_ENUM, LFO_NAME}}, {
         {"SYNC1", &patch.lfo_sync[0], 0, 1, 1, FMT_ONOFF, 0},
         {"SYNC2", &patch.lfo_sync[1], 0, 1, 1, FMT_ONOFF, 0}}},
+    [PAGE_MUTANT] = {"MUTATION", {
+        {"DEPTH", &mut_depth, 0, 100, 2, FMT_INT, 0},
+        {"SPEED", &mut_speed, 0, 100, 2, FMT_INT, 0},
+        {"INSTAB", &mut_instability, 0, 100, 2, FMT_INT, 0},
+        {"STYLE", &mut_style, 0, MUT_STYLES - 1, 1, FMT_ENUM, MUT_STYLE_NAME}},
+        {{0, 0, 0, 0, 0, 0, 0}, {0, 0, 0, 0, 0, 0, 0}}},
     [PAGE_GLOBAL] = {"GLOBAL", {
         {"GLIDE", &patch.glide, 0, 1000, 10, FMT_100, 0},
         {"BEND RANGE", &global.bend_range, 0, 12, 1, FMT_SEMI, 0},
         {"FINE TUNE", &global.fine, -100, 100, 1, FMT_BIP, 0},
         {"MIDI CH", &global.channel, 0, 16, 1, FMT_CHANNEL, 0}}, {
         {"LEGATO", &global.legato, 0, 1, 1, FMT_ONOFF, 0},
-        {0, 0, 0, 0, 0, 0, 0}}},
+        {"KEY MODE", &patch.mode, 0, MODES - 1, 1, FMT_ENUM, MODE_NAME}}},
 };
 
 static int16_t *knob_field(uint32_t i)
@@ -411,6 +425,7 @@ static void preset_select(uint32_t i)
     have_hybrid_cache = 0;
     have_animal_cache = 0;
     have_animal_vox_cache = 0;
+    mut_reset_on_preset();
     if (patch.engine < MUTANT_LOFI_MODEL)
         last_plaits_engine = patch.engine;
     dirty = D_ALL;
@@ -696,6 +711,8 @@ static void draw_enc_line(void)
         str_cpy(b, "SEL SLOT  K1 SRC K2 DST K3/4 AMT", sizeof b);
     if (page == PAGE_SAVE)
         str_cpy(b, "SEL SLOT  SAVE = WRITE", sizeof b);
+    if (page == PAGE_MUTANT)
+        str_cpy(b, "ARP=RND  PLAY=MUT/RUN  REC=CAP", sizeof b);
     for (i = 0; page != PAGE_MAIN && page != PAGE_MATRIX && page != PAGE_SAVE && i < 2u; i++) {
         if (!pg->enc[i].label)
             continue;
@@ -718,8 +735,10 @@ static void draw_status(void)
         cv_blit(0, 222);
         return;
     }
-    cv_text(8, 2, &FONT_S, MODE_NAME[patch.mode], MODE_COLOR[patch.mode]);
-    cv_text(60, 2, &FONT_S, hold ? "HOLD" : "", BANK_COLOR[2]);
+    cv_text(8, 2, &FONT_S, mut_machine ? "MUTANT" : "STUDIO",
+            mut_machine ? C_ACCENT : C_HI);
+    cv_text(60, 2, &FONT_S, mut_running ? "RUN" :
+            mut_have_capture ? "CAP" : "", BANK_COLOR[2]);
     str_cpy(b, "P", sizeof b);
     fmt_int(n, bank.current + 1);
     str_cpy(b + 1, n, sizeof b - 1);
@@ -883,7 +902,10 @@ static void draw_strip(uint32_t bit)
         draw_title("MOD MATRIX", 0);
     if (bit == D_HEADER && page == PAGE_SAVE)
         draw_title("SAVE", "PRESET");
-    if (bit == D_HEADER && page != PAGE_MAIN && page != PAGE_MATRIX && page != PAGE_SAVE)
+    if (bit == D_HEADER && page == PAGE_MUTANT)
+        draw_title("MUTATION", mut_machine ? "MUTANT" : "STUDIO");
+    if (bit == D_HEADER && page != PAGE_MAIN && page != PAGE_MATRIX &&
+        page != PAGE_SAVE && page != PAGE_MUTANT)
         draw_title(PAGE_DEF[page].title, 0);
     if (bit >= D_ROW0 && bit < D_ROW0 + 8u && page == PAGE_MATRIX)
         draw_matrix_row(bit - D_ROW0);
