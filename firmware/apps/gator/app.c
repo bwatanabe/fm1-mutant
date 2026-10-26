@@ -122,6 +122,10 @@ static void message(const char *s, uint32_t now);
 #include "mutant_behavior.c"
 static uint32_t glo_press_ms, rec_press_ms;
 static uint8_t glo_long, rec_long;
+/* Rising-edge triggers avoid repeat RANDOM / CAPTURE commands when the
+ * OP-XY re-sends a held CC value during playback. */
+static uint8_t midi_trigger_high[5];
+
 
 /* New engine imports should preserve the old preset format.
  * On FIRST switching from Plaits to LOFI, load Felucca's own clean
@@ -1183,6 +1187,46 @@ static void handle_keys(const fw_input_t *in)
 
 static void handle_midi_cc(uint32_t cc, uint32_t v)
 {
+    /* Dedicated Mutant performance CCs, accepted only on selected MIDI CH.
+     * 40 DEPTH; 41 SPEED; 42 INSTAB; 43 STYLE.
+     * 44 RUN (>=64 on, <64 off); 45 RANDOM/STEP; 46 CAPTURE;
+     * 47 RESTORE; 48 STUDIO/MUTANT; 49 CLEAR CAPTURE.
+     * The action CCs are triggered on low-to-high transitions only. */
+    if (cc >= 40u && cc <= 43u) {
+        int16_t *dest = cc == 40u ? &mut_depth : cc == 41u ? &mut_speed :
+                        cc == 42u ? &mut_instability : &mut_style;
+        *dest = (int16_t)(cc == 43u ? v * MUT_STYLES / 128u : v * 100u / 127u);
+        dirty |= FW_BIT(D_HEADER) | 0x1Eu;
+        return;
+    }
+    if (cc == 44u) {
+        if (mut_machine && (!!mut_running != (v >= 64u)))
+            mut_toggle_run(fm1_ms);
+        return;
+    }
+    if (cc == 48u) {
+        if ((uint32_t)mut_machine != (v >= 64u))
+            mut_toggle_machine(fm1_ms);
+        return;
+    }
+    if (cc == 45u || cc == 46u || cc == 47u || cc == 49u) {
+        const uint32_t slot = cc - 45u;
+        const uint8_t high = v >= 64u;
+        if (high && !midi_trigger_high[slot]) {
+            if (cc == 45u) {
+                if (mut_machine) mut_step(fm1_ms);
+                else mut_randomize_full(fm1_ms);
+            } else if (cc == 46u) {
+                mut_checkpoint(fm1_ms);
+            } else if (cc == 47u) {
+                mut_restore(fm1_ms);
+            } else {
+                mut_clear_capture(fm1_ms);
+            }
+        }
+        midi_trigger_high[slot] = high;
+        return;
+    }
     if (cc == 1u)
         mod_wheel = (uint8_t)v;  /* Manual CHIP VOX vowel morph when SPEED=0 */
     if (cc >= 16u && cc <= 18u)
