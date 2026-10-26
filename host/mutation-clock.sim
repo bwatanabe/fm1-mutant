@@ -1,0 +1,203 @@
+# Clock v0.10: exact MIDI realtime 24 PPQN vs free morph and internal BPM
+master 900
+frames 4
+midi 0xB0 48 127
+midi 0xB0 50 127
+midi 0xB0 52 40
+frames 2
+echo MIDI_IDLE
+state
+midi 0xB0 44 127
+frames 3
+echo WAITING_CLOCK
+state
+frames 110
+echo NO_CLOCK_NO_CHANGE
+state
+midi 0xFA 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+echo BEFORE_BEAT
+state
+midi 0xF8 0 0
+frames 2
+echo ON_BEAT
+state
+midi 0xFC 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+echo MIDI_STOPPED
+state
+midi 0xFA 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+midi 0xF8 0 0
+frames 1
+echo MIDI_RESTARTED
+state
+midi 0xB0 44 0
+midi 0xB0 50 43
+midi 0xB0 51 50
+frames 2
+midi 0xB0 44 127
+frames 5
+echo INTERNAL_EARLY
+state
+frames 48
+echo INTERNAL_BEAT
+state
+# engine change must keep RUN and produce a different anchored goal
+midi 0xB0 27 24
+frames 2
+echo ENGINE_SWITCH_RUN
+state
+midi 0xB0 27 26
+frames 2
+echo SECOND_SWITCH_RUN
+state
+midi 0xB0 44 0
+frames 2
+echo CLOCK_PAUSED
+state
+quit
