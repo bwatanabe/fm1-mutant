@@ -198,6 +198,14 @@ static int host_command(char *line)
     if (str_eq(cmd, "echo"))
         printf("%s %s %s\n", a, b, c);
 #ifdef MUTANT_V09_APP
+    /* Simulate the device-config load stage of a power-cycle; test that
+     * setting flash object 1 was written and can be recovered independently
+     * of the existing preset bank object 0. */
+    if (str_eq(cmd, "device_reload")) {
+        global.channel = 0;
+        button_glow = 0;
+        mutant_device_load();
+    }
     if (str_eq(cmd, "state")) {
         uint32_t i;
         uint32_t hash = 2166136261u, bank_hash = 2166136261u, capture_hash = 2166136261u;
