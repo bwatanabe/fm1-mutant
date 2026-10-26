@@ -114,6 +114,9 @@ btn SAVE up
 frames 2
 echo DEVICE_SAVED
 state
+device_reload
+echo DEVICE_RELOADED
+state
 # HOME returns us; GLO tap returns to Studio
 btn HOME down
 frames 1
