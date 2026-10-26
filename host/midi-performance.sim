@@ -1,0 +1,66 @@
+# Mutant v0.9.1: physical Global/Device channel + MIDI performance CCs
+master 900
+frames 5
+btn GLO down
+frames 48
+btn GLO up
+frames 2
+btn GLO down
+frames 48
+btn GLO up
+frames 2
+knob K2 15
+frames 2
+echo SELECTED_MIDI15
+state
+btn SAVE down
+frames 1
+btn SAVE up
+frames 2
+btn HOME down
+frames 1
+btn HOME up
+frames 2
+# Wrong channel (ch 1): must be ignored
+midi 0xB0 40 127
+frames 3
+echo WRONG_CHANNEL
+state
+# Correct channel (ch 15 = 0xBE), four sequencable performance CCs
+midi 0xBE 40 100
+midi 0xBE 41 110
+midi 0xBE 42 80
+midi 0xBE 43 127
+frames 3
+echo RIGHT_CHANNEL
+state
+# MIDI CC48 switches to MUTANT; CC44 runs/pauses
+midi 0xBE 48 127
+midi 0xBE 44 127
+frames 25
+echo MIDI_RUNNING
+state
+# Capture via CC46 only on rising edge
+midi 0xBE 46 127
+frames 2
+echo MIDI_CAPTURE
+state
+midi 0xBE 46 127
+frames 3
+echo MIDI_CAPTURE_NO_REPEAT
+state
+# Stop, restore on CC47, clear on CC49
+midi 0xBE 44 0
+midi 0xBE 47 127
+frames 3
+echo MIDI_RESTORED
+state
+midi 0xBE 49 127
+frames 2
+echo MIDI_CLEARED
+state
+midi 0xBE 48 0
+frames 3
+echo MIDI_STUDIO
+state
+quit
