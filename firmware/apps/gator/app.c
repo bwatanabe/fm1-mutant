@@ -217,7 +217,8 @@ static void switch_engine(int16_t next)
     const int16_t prior = patch.engine;
     if (next < 0 || next >= MUTANT_ENGINES || next == prior)
         return;
-    mut_stop(); /* never let an old engine's targets drive a new engine */
+    /* Keep MUTANT RUN alive across model changes, but reset the sound-space
+     * anchor to the new engine once it has been selected. */
     macro_all_notes_off();
     lo_all_off();
     vo_all_off();
@@ -259,6 +260,7 @@ static void switch_engine(int16_t next)
     }
     patch.engine = next;
     fm1_irq_on();
+    mut_reanchor(fm1_ms);
     dirty = D_ALL;
 }
 
@@ -285,6 +287,12 @@ static const page_t PAGE_DEF[PAGES] = {
         {"LFO2 WAVE", &patch.lfo_shape[1], 0, LFO_SHAPES - 1, 1, FMT_ENUM, LFO_NAME}}, {
         {"SYNC1", &patch.lfo_sync[0], 0, 1, 1, FMT_ONOFF, 0},
         {"SYNC2", &patch.lfo_sync[1], 0, 1, 1, FMT_ONOFF, 0}}},
+    [PAGE_CLOCK] = {"CLOCK", {
+        {"SOURCE", &mut_clock_mode, 0, MUT_CLK_COUNT-1, 1, FMT_ENUM, MUT_CLK_NAME},
+        {"BPM", &mut_bpm, 40, 240, 1, FMT_INT, 0},
+        {"DIVISION", &mut_div, 0, 4, 1, FMT_ENUM, MUT_DIV_NAME},
+        {0,0,0,0,0,0,0}},
+        {{0,0,0,0,0,0,0},{0,0,0,0,0,0,0}}},
     [PAGE_MUTANT] = {"MUTATION", {
         {"DEPTH", &mut_depth, 0, 100, 2, FMT_INT, 0},
         {"SPEED", &mut_speed, 0, 100, 2, FMT_INT, 0},
@@ -846,10 +854,15 @@ static void draw_enc_line(void)
     if (page == PAGE_MATRIX)
         str_cpy(b, "SEL SLOT  K1 SRC K2 DST K3/4 AMT", sizeof b);
     if (page == PAGE_SAVE)
-        str_cpy(b, "SEL SLOT  SAVE = WRITE", sizeof b);
+        str_cpy(b, delete_armed ? "REC=DELETE ARMED  ARP=CANCEL" : "EDIT=NAME  REC HOLD=DELETE", sizeof b);
+    if (page == PAGE_NAME)
+        str_cpy(b, "SEL=CURSOR  ALGO=CHAR  SAVE=OK", sizeof b);
+    if (page == PAGE_CLOCK)
+        str_cpy(b, "SEQ=MUTATION  CLOCK=TARGETS", sizeof b);
     if (page == PAGE_MUTANT)
         str_cpy(b, "ARP=RND  PLAY=MUT/RUN  REC=CAP", sizeof b);
-    for (i = 0; page != PAGE_MAIN && page != PAGE_MATRIX && page != PAGE_SAVE && i < 2u; i++) {
+    for (i = 0; page != PAGE_MAIN && page != PAGE_MATRIX &&
+         page != PAGE_SAVE && page != PAGE_NAME && i < 2u; i++) {
         if (!pg->enc[i].label)
             continue;
         str_cpy(b + str_len(b), i ? " ALGO " : "SEL ", sizeof b - str_len(b));
@@ -1023,11 +1036,29 @@ static void draw_save_row(uint32_t row)
     str_cpy(b, row == 1 ? "> P" : "  P", sizeof b);
     fmt_int(n, (int32_t)slot + 1);
     str_cpy(b + 3, n, sizeof b - 3);
-    str_cpy(b + str_len(b), "  ", sizeof b - str_len(b));
-    str_cpy(b + str_len(b), MODEL_NAME[bank.preset[slot].engine % MUTANT_ENGINES], sizeof b - str_len(b));
+    str_cpy(b + str_len(b), bank.used & (1u << slot) ? "  " : "  [EMPTY] ", sizeof b - str_len(b));
+    if (bank.used & (1u << slot))
+        str_cpy(b + str_len(b), bank.names[slot], sizeof b - str_len(b));
     cv_begin(240, ROW_H, C_BLACK);
     cv_text(8, 6, &FONT_S, b, row == 1 ? C_WHITE : C_DIM);
     cv_blit(0, 48u + row * 30u);
+}
+
+static void draw_name_row(uint32_t row)
+{
+    char b[48], n[8];
+    if (row == 0u) {
+        str_cpy(b, "NAME: ", sizeof b);
+        str_cpy(b + str_len(b), name_draft, sizeof b - str_len(b));
+    } else if (row == 1u) {
+        str_cpy(b, "CHAR ", sizeof b);
+        fmt_int(n, name_cursor + 1);
+        str_cpy(b + str_len(b), n, sizeof b - str_len(b));
+        str_cpy(b + str_len(b), "  (SELECT / ALGO)", sizeof b - str_len(b));
+    } else {
+        str_cpy(b, "SAVE = ACCEPT, HOME = EXIT", sizeof b);
+    }
+    draw_text_line(48u + row * 30u, b, row ? C_GRAY : C_WHITE);
 }
 
 static void draw_strip(uint32_t bit)
@@ -1037,13 +1068,15 @@ static void draw_strip(uint32_t bit)
     if (bit == D_HEADER && page == PAGE_MATRIX)
         draw_title("MOD MATRIX", 0);
     if (bit == D_HEADER && page == PAGE_SAVE)
-        draw_title("SAVE", "PRESET");
+        draw_title("PATCH LIBRARY", "SAVE=WRITE");
+    if (bit == D_HEADER && page == PAGE_NAME)
+        draw_title("EDIT NAME", "12 CHARS");
     if (bit == D_HEADER && page == PAGE_MUTANT)
         draw_title("MUTATION", mut_machine ? "MUTANT" : "STUDIO");
     if (bit == D_HEADER && page == PAGE_DEVICE)
         draw_title("DEVICE", "SAVE=CONFIG");
     if (bit == D_HEADER && page != PAGE_MAIN && page != PAGE_MATRIX &&
-        page != PAGE_SAVE && page != PAGE_MUTANT)
+        page != PAGE_SAVE && page != PAGE_NAME && page != PAGE_MUTANT)
         draw_title(PAGE_DEF[page].title, 0);
     if (bit >= D_ROW0 && bit < D_ROW0 + 8u && page == PAGE_MATRIX)
         draw_matrix_row(bit - D_ROW0);
@@ -1051,7 +1084,10 @@ static void draw_strip(uint32_t bit)
         draw_main_row(bit - D_ROW0);
     if (bit >= D_ROW0 && bit < D_ROW0 + 3u && page == PAGE_SAVE)
         draw_save_row(bit - D_ROW0);
-    if (bit >= D_ROW0 && bit < D_ROW0 + 4u && page != PAGE_MAIN && page != PAGE_MATRIX && page != PAGE_SAVE)
+    if (bit >= D_ROW0 && bit < D_ROW0 + 3u && page == PAGE_NAME)
+        draw_name_row(bit - D_ROW0);
+    if (bit >= D_ROW0 && bit < D_ROW0 + 4u && page != PAGE_MAIN &&
+        page != PAGE_MATRIX && page != PAGE_SAVE && page != PAGE_NAME)
         draw_generic_row(bit - D_ROW0);
     if (bit == D_ENC && page != PAGE_MATRIX)
         draw_enc_line();
@@ -1157,8 +1193,21 @@ static void handle_buttons(const fw_input_t *in)
     const uint32_t was = page;
     uint32_t i;
     for (i = 0; i < FW_NELEM(MAP); i++) {
-        if (in->pressed & FW_BIT(MAP[i][0]))
-            set_page(MAP[i][1]);
+        if (in->pressed & FW_BIT(MAP[i][0])) {
+            if (MAP[i][0] == FW_BTN_SEQ && was == PAGE_MUTANT)
+                set_page(PAGE_CLOCK);
+            else
+                set_page(MAP[i][1]);
+        }
+    }
+    if (was == PAGE_SAVE && (in->pressed & FW_BIT(FW_BTN_EDIT))) {
+        memcpy(name_draft, bank.names[save_slot], PATCH_NAME);
+        if (!(bank.used & (1u << save_slot)))
+            str_cpy(name_draft, "UNTITLED", PATCH_NAME);
+        name_cursor = 0;
+        name_staged = 0;
+        delete_armed = 0;
+        set_page(PAGE_NAME);
     }
     /* GLO short click toggles machine only on release. A long hold opens
      * the unmodified GLOBAL controls, and does not toggle the machine. */
@@ -1191,15 +1240,26 @@ static void handle_buttons(const fw_input_t *in)
     if ((in->held & FW_BIT(FW_BTN_REC)) && !rec_long &&
         (uint32_t)(in->ms - rec_press_ms) >= 2000u) {
         rec_long = 1;
-        mut_clear_capture(in->ms);
+        if (was == PAGE_SAVE) {
+            delete_armed = 1;
+            delete_armed_at = in->ms;
+            message("REC TO DELETE", in->ms);
+        } else if (was != PAGE_NAME) {
+            mut_clear_capture(in->ms);
+        }
     }
     if (in->released & FW_BIT(FW_BTN_REC)) {
-        if (rec_long) {
-            /* Already cleared; never also capture on release. */
-        } else if ((uint32_t)(in->ms - rec_press_ms) >= 650u) {
-            mut_restore(in->ms);
-        } else {
-            mut_checkpoint(in->ms);
+        if (was == PAGE_SAVE && !rec_long) {
+            if (delete_armed && (uint32_t)(in->ms - delete_armed_at) < 8000u) {
+                bank_delete(save_slot, in->ms);
+                delete_armed = 0;
+                dirty = D_ALL;
+            }
+        } else if (was != PAGE_NAME) {
+            if (rec_long) { /* clear action already fired */ }
+            else if ((uint32_t)(in->ms - rec_press_ms) >= 650u)
+                mut_restore(in->ms);
+            else mut_checkpoint(in->ms);
         }
     }
     /* HOME cycles Plaits -> LOFI -> VOICE -> CHIP VOX -> ANIMAL -> ANIMAL VOX -> Plaits.
@@ -1218,12 +1278,24 @@ static void handle_buttons(const fw_input_t *in)
         message(mutant_device_save() == 0 ? "CONFIG SAVED" : "CONFIG ERROR", in->ms);
     }
     if ((in->pressed & FW_BIT(FW_BTN_SAVE)) && was == PAGE_SAVE) {
-        bank_save(save_slot, in->ms);
-        set_page(PAGE_MAIN);
+        if (delete_armed) {
+            delete_armed = 0;
+            message("DELETE CANCELLED", in->ms);
+        } else {
+            bank_save(save_slot, in->ms);
+            set_page(PAGE_MAIN);
+        }
+    }
+    if ((in->pressed & FW_BIT(FW_BTN_SAVE)) && was == PAGE_NAME) {
+        name_draft[PATCH_NAME - 1] = 0;
+        name_staged = 1;
+        set_page(PAGE_SAVE); /* one more SAVE commits sound+name */
     }
     if ((in->pressed & FW_BIT(FW_BTN_SAVE)) && was != PAGE_SAVE &&
-        was != PAGE_GLOBAL && was != PAGE_DEVICE) {
+        was != PAGE_NAME && was != PAGE_GLOBAL && was != PAGE_DEVICE) {
         save_slot = bank.current;
+        name_staged = 0;
+        delete_armed = 0;
         set_page(PAGE_SAVE);
     }
     /* PLAY performs one bounded mutation in STUDIO; starts/stops autonomous
