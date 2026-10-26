@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only
  * Copyright (C) 2026 npi3pak */
+#define MUTANT_V09_APP 1
 #include "macro.h"
 #define MUTANT_LOFI_MODEL MACRO_ENGINES
 #define MUTANT_VOICE_MODEL (MACRO_ENGINES + 1)
